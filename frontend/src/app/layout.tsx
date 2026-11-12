@@ -1,0 +1,31 @@
+import type { Metadata } from "next";
+import Header from "@/components/Header";
+import Providers from "./providers";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Filings Research",
+  description:
+    "Ask questions in any language about S&P 100 SEC filings and get answers that cite their sources.",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap"
+        />
+      </head>
+      <body>
+        <Providers>
+          <Header />
+          <main className="page">{children}</main>
+        </Providers>
+      </body>
+    </html>
+  );
+}

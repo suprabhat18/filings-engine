@@ -1,0 +1,33 @@
+# Secrets
+.env
+.env.local
+*.key.json
+service-account*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local data from ingestion runs
+ingestion/data/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Deploy settings (contain your email)
+deploy/config.sh
+
+# Run logs
+*.log
+nohup.out

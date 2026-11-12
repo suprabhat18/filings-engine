@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "filings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ticker", "order": "ASCENDING" },
+        { "fieldPath": "filing_date", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
