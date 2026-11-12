@@ -14,7 +14,7 @@ say "Enabling APIs (takes a minute or two)"
 gcloud services enable \
   discoveryengine.googleapis.com aiplatform.googleapis.com firestore.googleapis.com \
   storage.googleapis.com run.googleapis.com cloudbuild.googleapis.com \
-  artifactregistry.googleapis.com cloudscheduler.googleapis.com iam.googleapis.com
+  artifactregistry.googleapis.com iam.googleapis.com
 
 say "Firestore database"
 if gcloud firestore databases describe --database="(default)" >/dev/null 2>&1; then
@@ -37,7 +37,7 @@ else
 fi
 
 say "Service accounts"
-for sa in filings-api filings-ingest filings-scheduler; do
+for sa in filings-api filings-ingest; do
   if gcloud iam service-accounts describe "$sa@$PROJECT_ID.iam.gserviceaccount.com" >/dev/null 2>&1; then
     echo "$sa already exists"
   else

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from edgar.config import Settings
-from edgar.daily import run_daily
+from edgar.update import run_update
 from test_ingestion import APPLE, FakeClient, _cols
 from test_publish import FakeCatalog, FakeStore
 
@@ -24,31 +24,34 @@ def responses():
     ])}}
     return {
         BASE + "CIK0000320193.json": sub,
-        FOLDER + "000032019326000020/new8k.htm": "<p>Item 2.02 Results</p>",
+        FOLDER + "000032019326000020/new8k.htm": "<p>Item 2.02 Results of Operations</p><p>The company announced results for the quarter, with revenue up in every segment.</p>",
         FOLDER + "000032019326000020/0000320193-26-000020-index.htm": "<html></html>",
-        FOLDER + "000032019326000019/newq.htm": "<p>Quarterly report</p>",
+        FOLDER + "000032019326000019/newq.htm": "<p>Quarterly report: net sales grew and the company returned cash to shareholders this quarter.</p>",
     }
 
 
-def test_daily_publishes_only_new_recent_filings():
+def test_update_publishes_only_new_recent_filings(tmp_path):
     settings = Settings(user_agent="t t@t.com", form_types=("10-K", "10-Q", "8-K"), lookback_days=14)
     store = FakeStore()
     catalog = FakeCatalog(existing=["320193-000032019326000010"])
-    imported: list[str] = []
+    imported: list[list[str]] = []
     client = FakeClient(responses())
 
-    summary = run_daily(client, [APPLE], settings, store, catalog, imported.append, log=lambda _: None)
+    summary = run_update(client, [APPLE], settings, store, catalog, imported.append, log=lambda _: None,
+                         save_dir=tmp_path)
 
     assert summary["seen"] == 3            # the 400-day-old 10-K is outside the window
     assert summary["new"] == 2
     assert summary["new_by_form"] == {"8-K": 1, "10-Q": 1}
-    assert imported == [summary["manifest_uri"]]
+    assert imported == [summary["manifest_uris"]] and summary["passages"] >= 2
     assert not any("oldk.htm" in c or "ancient.htm" in c for c in client.calls)
     assert "320193-000032019326000020" in catalog.filings
+    saved = sorted(p.name for p in (tmp_path / "filings" / "AAPL").glob("*.json"))
+    assert saved == ["000032019326000019.json", "000032019326000020.json"]  # kept for rebuilds
 
     # Next day, nothing new: no downloads, no import.
     imported.clear()
     client2 = FakeClient(responses())
-    summary2 = run_daily(client2, [APPLE], settings, store, catalog, imported.append, log=lambda _: None)
+    summary2 = run_update(client2, [APPLE], settings, store, catalog, imported.append, log=lambda _: None)
     assert summary2["new"] == 0 and imported == []
     assert len(client2.calls) == 1        # just the submissions lookup

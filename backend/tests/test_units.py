@@ -27,20 +27,17 @@ def test_format_passages_numbers_and_truncates():
     assert text == "[1] Apple 10-K\n" + "x" * 10
 
 
-def test_vertex_retriever_parses_chunk_results():
-    chunk = de.Chunk(
-        name="projects/p/locations/global/collections/default_collection/dataStores/ds"
-             "/branches/0/documents/320193-000032019326000010/chunks/c7",
-        content="Item 1A. Risk Factors: supply chain concentration...",
-        document_metadata=de.Chunk.DocumentMetadata(
-            title="Apple Inc. (AAPL) · 10-K · filed 2026-10-30",
+def test_vertex_retriever_parses_passage_documents():
+    def passage(doc_id, text, section="Item 1A. Risk Factors"):
+        return de.SearchResponse.SearchResult(document=de.Document(
+            id=doc_id,
             struct_data={
-                "filing_id": "320193-000032019326000010", "ticker": "AAPL",
+                "title": "Apple Inc. (AAPL) · 10-K · filed 2026-10-30", "section": section,
+                "filing_id": "320193-000032019326000010", "ticker": "AAPL", "text": text,
                 "company_name": "Apple Inc.", "form_type": "10-K", "filing_date": "2026-10-30",
-                "source_url": "https://www.sec.gov/x", "cik": 320193,
+                "source_url": "https://www.sec.gov/x", "cik": 320193, "filing_year": 2026,
             },
-        ),
-    )
+        ))
 
     class FakeSearchClient:
         def __init__(self):
@@ -48,7 +45,10 @@ def test_vertex_retriever_parses_chunk_results():
 
         def search(self, request):
             self.request = request
-            return de.SearchResponse(results=[de.SearchResponse.SearchResult(chunk=chunk)])
+            return de.SearchResponse(results=[
+                passage("320193-000032019326000010-0003", "Supply chain concentration in Asia..."),
+                passage("320193-000032019326000010-0009", "   "),  # empty text: skipped
+            ])
 
     retriever = VertexRetriever.__new__(VertexRetriever)
     retriever._de = de
@@ -56,29 +56,18 @@ def test_vertex_retriever_parses_chunk_results():
     retriever._serving_config = "projects/p/.../servingConfigs/default_search"
 
     (p,) = retriever.retrieve("supply chain", AppliedFilters(tickers=["AAPL"]), 5)
-    assert p.doc_id == "320193-000032019326000010"
+    assert p.doc_id == "320193-000032019326000010-0003"
+    assert p.filing_id == "320193-000032019326000010" and p.section == "Item 1A. Risk Factors"
     assert p.ticker == "AAPL" and p.form_type == "10-K" and p.filing_date == "2026-10-30"
     assert p.title.startswith("Apple Inc.") and p.source_url == "https://www.sec.gov/x"
-    assert "supply chain" in p.content
+    assert p.content == "Supply chain concentration in Asia..."
 
     req = retriever._client.request
     assert req.filter == 'ticker: ANY("AAPL")' and req.page_size == 5
-    assert req.content_search_spec.search_result_mode == de.SearchRequest.ContentSearchSpec.SearchResultMode.CHUNKS
+    assert req.content_search_spec.search_result_mode == de.SearchRequest.ContentSearchSpec.SearchResultMode.DOCUMENTS
 
 
 def test_firestore_store_imports():
     # FirestoreStore relies on these names existing in the installed library.
     from google.cloud import firestore
     assert hasattr(firestore, "FieldFilter") and hasattr(firestore, "transactional")
-
-
-def test_split_chunk_moves_headings_into_section():
-    from app.retrieval import split_chunk
-
-    content = ("# Apple Inc. (AAPL) · 10-K · filed 2026-11-03\n## Item 1A. | Risk Factors\n\n"
-               "The Company depends on outsourcing partners.")
-    section, body = split_chunk(content)
-    assert section == "Item 1A. Risk Factors"
-    assert body == "The Company depends on outsourcing partners."
-    assert split_chunk("Plain text, no headings.") == ("", "Plain text, no headings.")
-    assert split_chunk("# Only a title\n## Item 7. MD&A\n### Liquidity\nCash.")[0] == "Item 7. MD&A · Liquidity"

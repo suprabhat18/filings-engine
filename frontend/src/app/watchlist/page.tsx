@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import RequireSignIn from "@/components/RequireSignIn";
-import { api, ApiError, type Company, type Filing, formatDate, type WatchItem } from "@/lib/api";
+import { api, ApiError, type Company, type Filing, formatDate, type Me, type WatchItem } from "@/lib/api";
 
 function Watchlist() {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -12,6 +12,7 @@ function Watchlist() {
   const [choice, setChoice] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
 
   const reload = async () => {
     const [w, f] = await Promise.all([
@@ -23,6 +24,8 @@ function Watchlist() {
   };
 
   useEffect(() => {
+    // "Last updated" is a nice-to-have: never let it block the page.
+    api<Me>("me").then((me) => setUpdatedAt(me.index_updated_at)).catch(() => undefined);
     Promise.all([api<Company[]>("companies").then(setCompanies), reload()])
       .catch((e) => setError(e instanceof ApiError ? e.message : "Couldn't load your watchlist."))
       .finally(() => setLoading(false));
@@ -56,7 +59,10 @@ function Watchlist() {
   return (
     <div className="stack">
       <h1 className="page-title">Watchlist</h1>
-      <p className="muted">Follow companies to see their newest filings here, refreshed daily from EDGAR.</p>
+      <p className="muted">
+        Follow companies to see their newest filings here, from SEC EDGAR.
+        {updatedAt && <> Filings last updated {formatDate(updatedAt)}.</>}
+      </p>
 
       <form
         className="inline-form"

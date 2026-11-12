@@ -102,6 +102,7 @@ def create_app(services: Services | None = None) -> FastAPI:
             user=user,
             searches_today=s.store.searches_on(user.uid, today()),
             daily_quota=s.settings.daily_user_quota,
+            index_updated_at=s.store.index_updated_at(),
         )
 
     # ------------------------------------------------------------ search

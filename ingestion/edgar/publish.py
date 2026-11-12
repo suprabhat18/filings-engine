@@ -1,28 +1,35 @@
-"""Publish saved filings: upload to Cloud Storage, record them in Firestore, and
-import them into Vertex AI Search.
+"""Publish saved filings: split them into passages, upload the import files to Cloud
+Storage, record the filings in Firestore, and import the passages into Vertex AI Search.
 
-Usage (from the ingestion/ folder, after `python -m edgar.run`):
-    python -m edgar.publish            # publish everything not yet published
-    python -m edgar.publish --no-import   # upload only; import later
+Usage (from the ingestion/ folder):
+    python -m edgar.publish                       # publish saved filings not yet published
+    python -m edgar.publish --rebuild             # (re)publish every saved filing
+    python -m edgar.publish --tickers AAPL,MSFT   # only these companies
+    python -m edgar.publish --no-import           # upload only; import later
 
-Only filings missing from the Firestore catalog are uploaded, so this is safe to
-re-run and is the same code path the daily job uses.
+Filings already in the Firestore catalog are skipped unless --rebuild is given, so
+this is safe to re-run. `python -m edgar.update` uses the same code for new filings.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Protocol
+from typing import Any, Callable, Iterable, Iterator, Protocol
 
 from .documents import build_documents, filing_id, manifest_line
 
 FILINGS_COLLECTION = "filings"
 COMPANIES_COLLECTION = "companies"
+RUNS_COLLECTION = "ingestion_runs"
+
+# Each import file holds up to this many passages (about 30 MB). Vertex AI Search
+# accepts up to 100 files per import, so one import covers ~500,000 passages.
+LINES_PER_MANIFEST = 5_000
+BATCH = 100  # filings read and checked against the catalog at a time
 
 
 class BlobStore(Protocol):
@@ -65,9 +72,9 @@ class FirestoreCatalog:
         return found
 
     def record_run(self, summary: dict[str, Any]) -> None:
-        """Keep a log of daily runs (shows the pipeline really runs every day)."""
+        """Keep a log of update runs; the app shows the latest as 'last updated'."""
         run_id = summary["started_at"].replace(":", "").replace("-", "")
-        self._db.collection("ingestion_runs").document(run_id).set(summary)
+        self._db.collection(RUNS_COLLECTION).document(run_id).set(summary)
 
     def save(self, filings: list[dict[str, Any]], companies: list[dict[str, Any]]) -> None:
         items = [(FILINGS_COLLECTION, f["filing_id"], f) for f in filings]
@@ -86,11 +93,11 @@ class PublishResult:
     filings: int = 0
     documents: int = 0
     skipped: int = 0
-    manifest_uri: str | None = None
+    manifest_uris: list[str] = field(default_factory=list)
     new_filing_ids: list[str] = field(default_factory=list)
 
 
-def catalog_entry(record: dict[str, Any], doc_ids: list[str]) -> dict[str, Any]:
+def catalog_entry(record: dict[str, Any], passages: int) -> dict[str, Any]:
     return {
         "filing_id": filing_id(record),
         "ticker": record["ticker"],
@@ -104,9 +111,20 @@ def catalog_entry(record: dict[str, Any], doc_ids: list[str]) -> dict[str, Any]:
         "source_url": record["source_url"],
         "index_url": record["index_url"],
         "char_count": record["char_count"],
-        "doc_ids": doc_ids,
+        "passages": passages,
         "published_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+
+
+def _batches(items: Iterable[dict[str, Any]], size: int) -> Iterator[list[dict[str, Any]]]:
+    batch: list[dict[str, Any]] = []
+    for item in items:
+        batch.append(item)
+        if len(batch) == size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 def publish_records(
@@ -114,63 +132,69 @@ def publish_records(
     store: BlobStore,
     catalog: Catalog,
     log: Callable[[str], None] = print,
-    workers: int = 16,
+    rebuild: bool = False,
+    lines_per_manifest: int = LINES_PER_MANIFEST,
 ) -> PublishResult:
-    records = list(records)
-    result = PublishResult()
-    if not records:
-        return result
+    """Split filings into passages and upload them as JSONL import files.
 
-    already = catalog.existing([filing_id(r) for r in records])
-    todo = [r for r in records if filing_id(r) not in already]
-    result.skipped = len(records) - len(todo)
-    if not todo:
+    `records` may be a lazy iterator: filings are processed in small batches and each
+    import file is uploaded as soon as it is full, so memory use stays low even for
+    a full rebuild. Returns the uploaded file URIs; the caller runs the import.
+    """
+    result = PublishResult()
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    lines: list[str] = []
+    entries: list[dict[str, Any]] = []
+    companies: dict[str, dict[str, Any]] = {}
+
+    def upload_manifest() -> None:
+        nonlocal lines
+        if not lines:
+            return
+        n = len(result.manifest_uris) + 1
+        uri = store.upload(f"manifests/{stamp}-{n:03d}.jsonl", "\n".join(lines) + "\n",
+                           "application/x-ndjson")
+        result.manifest_uris.append(uri)
+        lines = []
+
+    for batch in _batches(records, BATCH):
+        ids = [filing_id(r) for r in batch]
+        already = set() if rebuild else catalog.existing(ids)
+        for record in batch:
+            if filing_id(record) in already:
+                result.skipped += 1
+                continue
+            docs = build_documents(record)
+            for doc in docs:
+                lines.append(json.dumps(manifest_line(doc), ensure_ascii=False))
+                if len(lines) >= lines_per_manifest:
+                    upload_manifest()
+            entries.append(catalog_entry(record, len(docs)))
+            companies[record["ticker"]] = {
+                "ticker": record["ticker"], "name": record["company_name"], "cik": record["cik"],
+            }
+            result.filings += 1
+            result.documents += len(docs)
+            if result.filings % 250 == 0:
+                log(f"  prepared {result.filings} filings ({result.documents:,} passages)")
+    upload_manifest()
+
+    if not result.filings:
         log(f"Nothing new to publish ({result.skipped} filings already published).")
         return result
 
-    log(f"Uploading {len(todo)} new filings ({result.skipped} already published)...")
-
-    def upload_one(record: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        lines = []
-        for doc in build_documents(record):
-            uri = store.upload(f"docs/{doc.doc_id}.html", doc.html, "text/html; charset=utf-8")
-            lines.append(manifest_line(doc, uri))
-        return record, lines
-
-    manifest: list[dict[str, Any]] = []
-    entries: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for n, (record, lines) in enumerate(pool.map(upload_one, todo), 1):
-            manifest.extend(lines)
-            entries.append(catalog_entry(record, [line["id"] for line in lines]))
-            if n % 250 == 0 or n == len(todo):
-                log(f"  uploaded {n}/{len(todo)}")
-
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    result.manifest_uri = store.upload(
-        f"manifests/{stamp}.jsonl",
-        "\n".join(json.dumps(line, ensure_ascii=False) for line in manifest) + "\n",
-        "application/x-ndjson",
-    )
-
-    companies = {
-        r["ticker"]: {"ticker": r["ticker"], "name": r["company_name"], "cik": r["cik"]}
-        for r in todo
-    }
     # Catalog is written last: if anything above fails, the next run retries these filings.
     catalog.save(entries, list(companies.values()))
-
-    result.filings = len(todo)
-    result.documents = len(manifest)
     result.new_filing_ids = [e["filing_id"] for e in entries]
     return result
 
 
-def load_saved_records(data_dir: Path) -> list[dict[str, Any]]:
-    return [
-        json.loads(p.read_text())
-        for p in sorted((data_dir / "filings").glob("*/*.json"))
-    ]
+def iter_saved_records(data_dir: Path, tickers: set[str] | None = None) -> Iterator[dict[str, Any]]:
+    """Saved filings, read one at a time (data/filings/<TICKER>/<accession>.json)."""
+    for path in sorted((data_dir / "filings").glob("*/*.json")):
+        if tickers and path.parent.name.upper() not in tickers:
+            continue
+        yield json.loads(path.read_text())
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -180,23 +204,40 @@ def main(argv: list[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser(description="Publish saved filings to GCP.")
     parser.add_argument("--data", type=Path, default=DEFAULT_OUT_DIR)
+    parser.add_argument("--tickers", help="comma-separated tickers, e.g. AAPL,MSFT")
+    parser.add_argument("--rebuild", action="store_true",
+                        help="publish every saved filing, even ones already in the catalog")
     parser.add_argument("--no-import", action="store_true", help="upload only")
     args = parser.parse_args(argv)
 
     gcp = load_gcp_settings()
-    records = load_saved_records(args.data)
-    print(f"Found {len(records)} saved filings in {args.data}")
+    tickers = {t.strip().upper() for t in args.tickers.split(",")} if args.tickers else None
+    print(f"Reading saved filings from {args.data}"
+          + (f" for {', '.join(sorted(tickers))}" if tickers else ""))
 
+    catalog = FirestoreCatalog(gcp.project_id)
+    started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     result = publish_records(
-        records,
+        iter_saved_records(args.data, tickers),
         GcsStore(gcp.project_id, gcp.bucket),
-        FirestoreCatalog(gcp.project_id),
+        catalog,
+        rebuild=args.rebuild,
     )
-    if result.manifest_uri:
-        print(f"Published {result.filings} filings as {result.documents} search documents.")
-        print(f"Manifest: {result.manifest_uri}")
-        if not args.no_import:
-            import_documents(gcp, result.manifest_uri)
+    if result.manifest_uris:
+        print(f"Published {result.filings} filings as {result.documents:,} passages "
+              f"in {len(result.manifest_uris)} import file(s).")
+        if args.no_import:
+            print("Import later with: python -m edgar.search_index import " + " ".join(result.manifest_uris))
+            return
+        import_documents(gcp, result.manifest_uris)
+        catalog.record_run({
+            "started_at": started,
+            "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "kind": "rebuild" if args.rebuild else "publish",
+            "new": result.filings,
+            "passages": result.documents,
+            "manifest_uris": result.manifest_uris,
+        })
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     gcp_project_id: str = ""
     gcp_location: str = "global"  # Vertex AI Search location
-    vertex_search_engine_id: str = "sec-filings-search"
+    vertex_search_engine_id: str = "sec-passages-search"
     results_per_query: int = 8
 
     gemini_model: str = "gemini-3.8-flash"

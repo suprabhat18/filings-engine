@@ -7,6 +7,10 @@ import { needsRefresh, refreshIdToken } from "@/lib/auth";
  * user's Google ID token server-side. The browser only ever talks to this app.
  */
 
+// A search makes two Gemini calls plus a Vertex AI Search query, and the backend may be
+// starting up from zero instances: allow up to a minute before Vercel gives up.
+export const maxDuration = 60;
+
 const ALLOWED = /^(me|search|companies|watchlist(\/filings|\/[A-Za-z0-9.\-]{1,10})?|bookmarks(\/[A-Za-z0-9]{1,64})?|history)$/;
 
 async function handler(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {

@@ -61,6 +61,7 @@ export type Me = {
   user: { uid: string; email: string; name: string; picture: string };
   searches_today: number;
   daily_quota: number;
+  index_updated_at: string | null;
 };
 
 export class ApiError extends Error {

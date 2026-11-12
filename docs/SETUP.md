@@ -59,7 +59,7 @@ Edit `ingestion/.env`: set `SEC_USER_AGENT`, `GCP_PROJECT_ID`, and
 `GCS_BUCKET` (your project ID followed by `-filings`).
 
 ```bash
-python -m pytest                     # should end with "18 passed"
+python -m pytest                     # should end with "21 passed"
 python -m edgar.run                  # prints filing counts at the end
 ```
 
@@ -70,13 +70,17 @@ python -m edgar.run                  # prints filing counts at the end
 Still in `ingestion/` with the virtual environment active:
 
 ```bash
-python -m edgar.search_index setup   # creates the Vertex AI Search data store and app
-python -m edgar.publish              # uploads filings and imports them; waits until done
+python -m edgar.search_index setup                 # data store (free parser), schema, search app
+python -m edgar.publish --tickers AAPL,MSFT,JPM    # small trial first: a few cents at most
 python -m edgar.search_index test "supply chain risk"
+python -m edgar.publish                            # then everything else; waits until done
 ```
 
-The last command should print five filing excerpts. If it prints nothing right after the
-import, wait 5–10 minutes and try again.
+`publish` splits every filing into passages of about 350 words, each labelled with its
+section ("Item 1A. Risk Factors"), and imports them as plain text. Vertex AI Search's
+default parser handles plain text free of charge, so building the index costs almost
+nothing. The test search should print five passages with their sections. If it prints
+nothing right after an import, wait 5–10 minutes and try again.
 
 ## 5. Create the Google sign-in credentials (~10 min, in the Cloud Console)
 
@@ -127,16 +131,22 @@ check that should say `{"status":"ok"}`.
 
 Open the site, sign in, and try a search.
 
-## 8. Turn on the daily updates (~10 min)
+## 8. Keeping the filings up to date (whenever you like, ~5 min)
+
+There is no scheduled job: you decide when to update. In `ingestion/` with the
+virtual environment active:
 
 ```bash
-bash deploy/03_deploy_daily_job.sh
-gcloud run jobs execute filings-daily --region=us-central1 --wait
+python -m edgar.update                       # new filings from the last 14 days
+python -m edgar.update --days 60             # look further back, e.g. after a break
+python -m edgar.update --since 2026-10-01    # or from a given date
+python -m edgar.update --tickers AAPL,MSFT   # only some companies
 ```
 
-The test run should finish with a line like `Done: 3 new filings ...`. From now on it
-runs every morning at 6:17 ET. Each run is recorded in Firestore under `ingestion_runs`,
-which is your evidence that the incremental pipeline really runs daily.
+It skips filings already in the index, so overlapping windows cost nothing. New filings
+are also saved under `ingestion/data/`, so a later `publish --rebuild` includes them.
+Each run is logged in Firestore (`ingestion_runs`), and the watchlist page shows the
+date of the latest one.
 
 ---
 
@@ -157,16 +167,27 @@ The local backend uses your own Google login (from `gcloud auth application-defa
 
 ## Costs
 
-At demo traffic this should cost a few dollars a month, well inside the $300 credit. The
-main items are Vertex AI Search (index storage and per-query charges), Gemini 3.8 Flash
-(two short calls per search) and Cloud Run (scales to zero when idle). Check the current
-prices on Google's pricing pages for Vertex AI Search and Vertex AI before sharing the
-link widely. The backend caps usage at 50 searches per user and 1,000 in total per day
-(change `DAILY_USER_QUOTA` and `DAILY_GLOBAL_QUOTA`), and the budget alert from step 2
-emails you before spending gets close to your limit.
+At demo traffic this should cost a few dollars a month. Approximate list prices
+(check Google's pricing pages for current rates):
 
-To shut everything down: delete the Cloud Run service and job, the Scheduler job, the
-Vertex AI Search app and data store, and the bucket, or simply delete the GCP project.
+| Item | Price | In practice |
+|---|---|---|
+| Vertex AI Search queries (Enterprise tier) | ~$4 per 1,000 searches | under $1/month for a demo |
+| Gemini 3.8 Flash | two short calls per search | cents |
+| Index storage, Cloud Storage, Firestore, Cloud Run | per GB / free tiers | cents to a few dollars a month |
+| Parsing filings at import | **free** with the default parser this project uses | $0 |
+
+Avoid turning on Vertex AI Search's **layout parser** for this data: it is billed at
+about $10 per 1,000 pages, and two years of S&P 100 filings is tens of thousands of
+pages, so a single import can cost hundreds of dollars.
+
+The backend caps usage at 50 searches per user and 1,000 in total per day (change
+`DAILY_USER_QUOTA` and `DAILY_GLOBAL_QUOTA`), and the budget alert from step 2 emails you
+before spending gets close to your limit.
+
+To shut everything down: delete the Cloud Run service, the Vertex AI Search app and data
+store (`python -m edgar.search_index delete ...`), and the bucket, or simply delete the
+GCP project.
 
 ## If something goes wrong
 
@@ -174,7 +195,7 @@ Vertex AI Search app and data store, and the bucket, or simply delete the GCP pr
 |---|---|
 | `edgar.run` prints 403 errors | `SEC_USER_AGENT` is missing or isn't a real name and email. |
 | `search_index setup` says permission denied | Run `gcloud auth application-default login` again with the account that owns the project. |
-| Import finishes with failures | Details are in `gs://<bucket>/import-errors/`. Re-run `python -m edgar.search_index import <manifest uri>`. |
+| Import finishes with failures | Details are in `gs://<bucket>/import-errors/`. Re-run `python -m edgar.search_index import <file uris>` with the files `publish` printed. |
 | Search returns "temporarily unavailable" | Backend logs: Cloud Console → Cloud Run → filings-api → Logs. Often the Gemini model name or region; check `GEMINI_MODEL`. |
 | Sign-in loops or "redirect_uri_mismatch" | The redirect URI in the OAuth client must exactly match `<site>/api/auth/callback/google`. |
 | Watchlist feed errors with "requires an index" | The Firestore index from step 2 is still building; wait a few minutes. |

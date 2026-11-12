@@ -9,4 +9,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY edgar ./edgar
 COPY sp100.txt .
 
-CMD ["python", "-m", "edgar.daily"]
+CMD ["python", "-m", "edgar.update"]

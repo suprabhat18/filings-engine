@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 
+import base64
+
 from edgar.documents import (
+    MAX_WORDS,
     SCHEMA,
     build_documents,
     filing_id,
     manifest_line,
-    split_parts,
-    text_to_html,
+    split_passages,
 )
 from edgar.publish import publish_records
 
@@ -56,78 +58,124 @@ class FakeCatalog:
         self.companies.update({c["ticker"]: c for c in companies})
 
 
-def test_html_has_headings_and_escapes():
-    page = text_to_html("Apple <10-K>", "Item 1A. Risk Factors\n\nA & B\nline two\n\nNet sales | 1 | 2")
-    assert "<title>Apple &lt;10-K&gt;</title>" in page
-    assert "<h2>Item 1A. Risk Factors</h2>" in page
-    assert "<p>A &amp; B<br>line two</p>" in page
-    assert "<p>Net sales | 1 | 2</p>" in page
+FILING_TEXT = """Apple Inc.
+FORM 10-K
+Item 1A. | Risk Factors | 5
+Item 7. | Management's Discussion and Analysis | 20
+PART I
+Item 1.
+Business
+The Company designs, manufactures and markets smartphones, personal computers, tablets and wearables worldwide.
+12
+Item 1A.
+Risk Factors
+The Company depends on component and product manufacturing provided by outsourcing partners, many located outside the U.S.
+Supply chain disruptions could materially affect results. Item 5 of this report describes more.
+Item 5 is not applicable.
+PART II
+Item 7. Management's Discussion and Analysis of Financial Condition
+Net sales increased due to higher iPhone sales across all geographic segments this fiscal year.
+Net sales | 391,035 | 383,285
+"""
 
 
-def test_split_parts_respects_limit_and_keeps_all_text():
-    paras = [("word " * 50).strip() for _ in range(100)]
-    text = "\n\n".join(paras)
-    parts = split_parts(text, max_bytes=2_000)
-    assert len(parts) > 1
-    assert all(len(p.encode()) <= 2_000 for p in parts)
-    assert "\n\n".join(parts) == text
+def test_split_passages_tracks_sections():
+    passages = split_passages(FILING_TEXT)
+    sections = [s for s, _ in passages]
+    assert sections == [
+        "",  # cover page and table of contents (lines with "|" are never headings)
+        "Item 1. Business",
+        "Item 1A. Risk Factors",
+        "Item 7. Management's Discussion and Analysis of Financial Condition",
+    ]
+    text = dict(passages)
+    assert "outsourcing partners" in text["Item 1A. Risk Factors"]
+    assert "Item 5 is not applicable." in text["Item 1A. Risk Factors"]  # a sentence, not a heading
+    assert "12" not in text["Item 1. Business"].split()                  # page number dropped
+    assert "Net sales | 391,035" in text[sections[-1]]                    # table rows kept
 
 
-def test_split_parts_hard_splits_giant_paragraph():
-    parts = split_parts("x" * 5_000, max_bytes=2_000)
-    assert [len(p) for p in parts] == [2_000, 2_000, 1_000]
+def test_split_passages_8k_items_and_exhibits():
+    text = ("Item 2.02 Results of Operations and Financial Condition\n"
+            "On October 30, 2026 the Company issued a press release announcing quarterly results.\n\n"
+            "Exhibit 99.1\nApple reports fourth quarter results with record revenue in services and growth.")
+    assert [s for s, _ in split_passages(text)] == [
+        "Item 2.02 Results of Operations and Financial Condition", "Exhibit 99.1",
+    ]
+
+
+def test_split_passages_sizes_and_keeps_all_words():
+    lines = [("word " * 60).strip() for _ in range(40)] + [("long " * 1200).strip()]
+    passages = split_passages("Item 7. MD&A\n" + "\n".join(lines))
+    assert len(passages) > 5
+    assert all(len(p.split()) <= MAX_WORDS for _, p in passages)
+    assert sum(len(p.split()) for _, p in passages) == 60 * 40 + 1200
 
 
 def test_build_documents_ids_and_metadata():
-    (doc,) = build_documents(record())
-    assert doc.doc_id == "320193-000032019326000010" == filing_id(record())
-    assert doc.struct_data["filing_year"] == 2026
-    assert doc.struct_data["ticker"] == "AAPL"
-    assert set(doc.struct_data) <= set(SCHEMA["properties"])  # every field is in the schema
+    docs = build_documents(record(text=FILING_TEXT))
+    assert len(docs) == 4
+    doc = docs[2]
+    assert doc.doc_id == f"{filing_id(record())}-0003"
+    assert all(len(d.doc_id) <= 63 for d in docs)  # Vertex AI Search ID limit
+    data = doc.struct_data
+    assert data["section"] == "Item 1A. Risk Factors" and data["passage"] == 3
+    assert data["total_passages"] == 4 and data["filing_year"] == 2026 and data["ticker"] == "AAPL"
+    assert "outsourcing partners" in data["text"]
+    assert doc.content.startswith("Apple Inc. (AAPL) · 10-K · filed 2026-10-30 · Item 1A. Risk Factors\n\n")
+    assert set(data) <= set(SCHEMA["properties"])  # every field is in the schema
 
-    line = manifest_line(doc, "gs://b/docs/x.html")
-    assert line == {
-        "id": doc.doc_id,
-        "structData": doc.struct_data,
-        "content": {"mimeType": "text/html", "uri": "gs://b/docs/x.html"},
-    }
-
-
-def test_build_documents_multi_part(monkeypatch):
-    import edgar.documents as d
-    monkeypatch.setattr(d, "MAX_PART_BYTES", 50)
-    docs = d.build_documents(record(text="\n\n".join(["paragraph number %d here" % i for i in range(10)])))
-    assert len(docs) > 1
-    assert docs[0].doc_id.endswith("-p1") and docs[0].struct_data["total_parts"] == len(docs)
-    assert all(len(doc.doc_id) <= 63 for doc in docs)  # Vertex AI Search ID limit
-    assert "(part 1 of" in docs[0].title
+    line = manifest_line(doc)
+    assert line["id"] == doc.doc_id and line["structData"] == data
+    assert line["content"]["mimeType"] == "text/plain"
+    assert base64.b64decode(line["content"]["rawBytes"]).decode() == doc.content
 
 
-def test_publish_uploads_new_only_and_writes_manifest():
+def test_manifest_line_parses_as_a_vertex_document():
+    from google.cloud import discoveryengine_v1 as de
+
+    doc = build_documents(record(text=FILING_TEXT))[2]
+    parsed = de.Document.from_json(json.dumps(manifest_line(doc)))
+    assert parsed.id == doc.doc_id
+    assert parsed.content.raw_bytes.decode() == doc.content
+    assert parsed.struct_data["section"] == "Item 1A. Risk Factors"
+
+
+def test_publish_new_only_in_sharded_manifests():
     store, catalog = FakeStore(), FakeCatalog(existing=["320193-000032019326000009"])
     records = [
-        record(),
-        record(accession="000032019326000009"),  # already published
+        record(text=FILING_TEXT),
+        record(accession="000032019326000009", text=FILING_TEXT),  # already published
         record(accession="000178951926000001", cik=1789519, ticker="GOOG",
-               company_name="Alphabet Inc."),
+               company_name="Alphabet Inc.", text=FILING_TEXT),
     ]
-    logs = []
-    result = publish_records(records, store, catalog, log=logs.append, workers=2)
+    result = publish_records(iter(records), store, catalog, log=lambda _: None, lines_per_manifest=3)
 
-    assert result.filings == 2 and result.skipped == 1 and result.documents == 2
-    assert "docs/320193-000032019326000010.html" in store.files
-    assert "docs/320193-000032019326000009.html" not in store.files
+    assert result.filings == 2 and result.skipped == 1 and result.documents == 8
+    assert len(result.manifest_uris) == 3  # 8 passages, at most 3 per file
+    ids = [json.loads(l)["id"] for uri in result.manifest_uris
+           for l in store.files[uri.removeprefix("gs://b/")].splitlines()]
+    assert len(ids) == 8 and not any("000032019326000009" in i for i in ids)
 
-    manifest_path = result.manifest_uri.removeprefix("gs://b/")
-    lines = [json.loads(l) for l in store.files[manifest_path].splitlines()]
-    assert {l["id"] for l in lines} == {"320193-000032019326000010", "1789519-000178951926000001"}
-
-    assert catalog.filings["320193-000032019326000010"]["doc_ids"] == ["320193-000032019326000010"]
+    assert catalog.filings["320193-000032019326000010"]["passages"] == 4
     assert set(catalog.companies) == {"AAPL", "GOOG"}
 
-    # Second run: nothing left to do, no new manifest.
-    again = publish_records(records, store, catalog, log=logs.append)
-    assert again.filings == 0 and again.manifest_uri is None
+    # Second run: nothing left to do, no new files. --rebuild republishes everything.
+    again = publish_records(records, store, catalog, log=lambda _: None)
+    assert again.filings == 0 and again.manifest_uris == []
+    rebuilt = publish_records(records, store, catalog, log=lambda _: None, rebuild=True)
+    assert rebuilt.filings == 3 and rebuilt.skipped == 0
+
+
+def test_iter_saved_records_filters_by_ticker(tmp_path):
+    from edgar.publish import iter_saved_records
+
+    for ticker, acc in [("AAPL", "1"), ("AAPL", "2"), ("MSFT", "3")]:
+        path = tmp_path / "filings" / ticker / f"{acc}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"id": acc, "ticker": ticker}))
+    assert [r["id"] for r in iter_saved_records(tmp_path)] == ["1", "2", "3"]
+    assert [r["id"] for r in iter_saved_records(tmp_path, {"MSFT"})] == ["3"]
 
 
 def test_schema_key_title_is_not_searchable_or_indexable():

@@ -40,6 +40,7 @@ class Store(Protocol):
     def searches_on(self, uid: str, day: str) -> int: ...
 
     def list_companies(self) -> list[dict[str, Any]]: ...
+    def index_updated_at(self) -> str | None: ...
     def recent_filings(self, tickers: list[str], limit: int) -> list[dict[str, Any]]: ...
 
     def get_watchlist(self, uid: str) -> list[dict[str, Any]]: ...
@@ -65,6 +66,7 @@ class MemoryStore:
         self.usage: dict[str, int] = {}
         self.companies = list(companies or [])
         self.filings = list(filings or [])
+        self.runs: list[dict] = []
         self.watch: dict[str, dict[str, dict]] = {}
         self.bookmarks: dict[str, dict[str, dict]] = {}
         self.history: dict[str, dict[str, dict]] = {}
@@ -92,6 +94,10 @@ class MemoryStore:
 
     def list_companies(self):
         return sorted(self.companies, key=lambda c: c["ticker"])
+
+    def index_updated_at(self):
+        done = [r["finished_at"] for r in self.runs if r.get("finished_at")]
+        return max(done) if done else None
 
     def recent_filings(self, tickers, limit):
         rows = [f for f in self.filings if f["ticker"] in set(tickers)]
@@ -181,6 +187,17 @@ class FirestoreStore:
                       key=lambda c: c["ticker"])
         self._companies = (time.monotonic(), rows)
         return rows
+
+    def index_updated_at(self):
+        """Finish time of the latest ingestion run (written by ingestion/edgar/update.py)."""
+        query = (
+            self.db.collection("ingestion_runs")
+            .order_by("finished_at", direction=self._fs.Query.DESCENDING)
+            .limit(1)
+        )
+        for snap in query.stream():
+            return snap.to_dict().get("finished_at")
+        return None
 
     def recent_filings(self, tickers, limit):
         if not tickers:

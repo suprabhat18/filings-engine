@@ -1,4 +1,4 @@
-"""Retrieve relevant filing chunks from Vertex AI Search."""
+"""Retrieve relevant filing passages from Vertex AI Search."""
 
 from __future__ import annotations
 
@@ -12,33 +12,6 @@ _TICKER = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
 class Retriever(Protocol):
     def retrieve(self, query: str, filters: AppliedFilters, k: int) -> list[Passage]: ...
-
-
-_HEADING = re.compile(r"^\s*#{1,6}\s+(.*?)\s*$")
-
-
-def split_chunk(content: str) -> tuple[str, str]:
-    """Separate the headings Vertex AI Search puts at the top of each chunk.
-
-    With `include_ancestor_headings`, a chunk starts with markdown-style lines such as
-    "# Apple Inc. (AAPL) · 10-K · filed 2026-11-03" and "## Item 1A. Risk Factors".
-    The first is the document title (already shown separately); the rest name the
-    section. Returns (section, body).
-    """
-    lines = content.splitlines()
-    headings: list[str] = []
-    i = 0
-    while i < len(lines):
-        m = _HEADING.match(lines[i])
-        if m:
-            headings.append(m.group(1))
-        elif lines[i].strip():
-            break
-        i += 1
-    section_parts = [" ".join(h.replace("|", " ").split()) for h in headings[1:]]
-    section = " · ".join(part for part in section_parts if part)
-    body = "\n".join(lines[i:]).strip()
-    return section, body or content.strip()
 
 
 def build_filter(filters: AppliedFilters) -> str:
@@ -58,12 +31,6 @@ def build_filter(filters: AppliedFilters) -> str:
 
 def valid_ticker(ticker: str) -> bool:
     return bool(_TICKER.match(ticker))
-
-
-def _doc_id_from_chunk_name(name: str) -> str:
-    # projects/.../documents/{doc_id}/chunks/{chunk_id}
-    parts = name.split("/")
-    return parts[parts.index("documents") + 1] if "documents" in parts else ""
 
 
 class VertexRetriever:
@@ -86,21 +53,24 @@ class VertexRetriever:
             query=query,
             page_size=k,
             filter=build_filter(filters),
-            content_search_spec=spec(search_result_mode=spec.SearchResultMode.CHUNKS),
+            # Each indexed document is one passage (split at import, see
+            # ingestion/edgar/documents.py) carrying its text and section as metadata.
+            content_search_spec=spec(search_result_mode=spec.SearchResultMode.DOCUMENTS),
         )
         response = self._client.search(request=request)
         passages = []
         for result in response.results:
-            chunk = de.Chunk.to_dict(result.chunk)
-            meta = chunk.get("document_metadata") or {}
-            data = meta.get("struct_data") or {}
-            section, body = split_chunk(chunk.get("content", ""))
+            doc = de.Document.to_dict(result.document)
+            data = doc.get("struct_data") or {}
+            text = str(data.get("text", "")).strip()
+            if not text:
+                continue
             passages.append(
                 Passage(
-                    doc_id=_doc_id_from_chunk_name(chunk.get("name", "")),
-                    content=body,
-                    section=section,
-                    title=meta.get("title") or data.get("title", ""),
+                    doc_id=doc.get("id", ""),
+                    content=text,
+                    section=str(data.get("section", "")),
+                    title=str(data.get("title", "")),
                     filing_id=str(data.get("filing_id", "")),
                     ticker=str(data.get("ticker", "")),
                     company_name=str(data.get("company_name", "")),

@@ -57,8 +57,8 @@ def load_gcp_settings() -> GcpSettings:
         project_id=project,
         bucket=bucket,
         location=os.getenv("GCP_LOCATION", "global"),
-        data_store_id=os.getenv("VERTEX_SEARCH_DATA_STORE_ID", "sec-filings"),
-        engine_id=os.getenv("VERTEX_SEARCH_ENGINE_ID", "sec-filings-search"),
+        data_store_id=os.getenv("VERTEX_SEARCH_DATA_STORE_ID", "sec-passages"),
+        engine_id=os.getenv("VERTEX_SEARCH_ENGINE_ID", "sec-passages-search"),
     )
 
 

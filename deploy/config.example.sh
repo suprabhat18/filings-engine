@@ -7,8 +7,8 @@ BUCKET="${PROJECT_ID}-filings"
 
 # Vertex AI Search (must match ingestion/.env)
 SEARCH_LOCATION="global"
-DATA_STORE_ID="sec-filings"
-ENGINE_ID="sec-filings-search"
+DATA_STORE_ID="sec-passages"
+ENGINE_ID="sec-passages-search"
 
 # Gemini
 GEMINI_MODEL="gemini-3.8-flash"

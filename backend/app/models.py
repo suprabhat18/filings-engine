@@ -128,3 +128,4 @@ class Me(BaseModel):
     user: User
     searches_today: int
     daily_quota: int
+    index_updated_at: str | None = None  # when filings were last imported (UTC, ISO)

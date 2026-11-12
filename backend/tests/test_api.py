@@ -101,6 +101,11 @@ def test_me_reports_quota():
     me = client.get("/me", headers=AUTH).json()
     assert me["user"]["email"] == "alice@example.com"
     assert me["searches_today"] == 1 and me["daily_quota"] == 5
+    assert me["index_updated_at"] is None  # no update has run yet
+
+    client.services.store.runs += [{"finished_at": "2026-11-10T09:00:00+00:00"},
+                                   {"finished_at": "2026-11-12T08:30:00+00:00"}, {}]
+    assert client.get("/me", headers=AUTH).json()["index_updated_at"] == "2026-11-12T08:30:00+00:00"
 
 
 # ---------------------------------------------------------------- search
