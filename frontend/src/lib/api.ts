@@ -8,6 +8,7 @@ export type Citation = {
   doc_id: string;
   content: string;
   title: string;
+  section?: string;
   filing_id: string;
   ticker: string;
   company_name: string;
@@ -77,7 +78,9 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const detail = typeof data.detail === "string" ? data.detail : "Something went wrong. Try again.";
+    const detail = typeof data.detail === "string"
+        ? data.detail
+        : `Something went wrong (error ${res.status}). Try again.`;
     throw new ApiError(res.status, detail);
   }
   return data as T;

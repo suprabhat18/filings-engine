@@ -70,3 +70,15 @@ def test_firestore_store_imports():
     # FirestoreStore relies on these names existing in the installed library.
     from google.cloud import firestore
     assert hasattr(firestore, "FieldFilter") and hasattr(firestore, "transactional")
+
+
+def test_split_chunk_moves_headings_into_section():
+    from app.retrieval import split_chunk
+
+    content = ("# Apple Inc. (AAPL) · 10-K · filed 2026-11-03\n## Item 1A. | Risk Factors\n\n"
+               "The Company depends on outsourcing partners.")
+    section, body = split_chunk(content)
+    assert section == "Item 1A. Risk Factors"
+    assert body == "The Company depends on outsourcing partners."
+    assert split_chunk("Plain text, no headings.") == ("", "Plain text, no headings.")
+    assert split_chunk("# Only a title\n## Item 7. MD&A\n### Liquidity\nCash.")[0] == "Item 7. MD&A · Liquidity"

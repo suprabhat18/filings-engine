@@ -332,6 +332,7 @@ export default function SearchView() {
                     <div className="source__body">
                       <p className="source__title">
                         {c.company_name || c.ticker} <span className="source__form">{c.form_type}</span>
+                        {c.section && <span className="source__section">, {c.section}</span>}
                       </p>
                       <p className="source__date">Filed {formatDate(c.filing_date)}</p>
                       <blockquote className="source__excerpt">

@@ -45,6 +45,7 @@ class Passage(BaseModel):
     doc_id: str
     content: str
     title: str = ""
+    section: str = ""  # e.g. "Item 1A. Risk Factors", from the chunk's headings
     filing_id: str = ""
     ticker: str = ""
     company_name: str = ""

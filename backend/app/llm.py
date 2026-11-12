@@ -38,6 +38,8 @@ def format_passages(passages: list[Passage], max_chars: int = 2_500) -> str:
     blocks = []
     for i, p in enumerate(passages, 1):
         header = p.title or f"{p.company_name} ({p.ticker}) {p.form_type} filed {p.filing_date}"
+        if p.section:
+            header += f" — {p.section}"
         blocks.append(f"[{i}] {header}\n{p.content[:max_chars]}")
     return "\n\n".join(blocks)
 

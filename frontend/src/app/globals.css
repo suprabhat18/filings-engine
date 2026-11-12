@@ -743,6 +743,11 @@ a {
   margin: 0;
 }
 
+.source__section {
+  color: var(--slate);
+  font-weight: 400;
+}
+
 .source__form {
   font-weight: 500;
   color: inherit;

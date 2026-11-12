@@ -3,7 +3,7 @@
 import { Fragment, type ReactNode } from "react";
 
 /**
- * Renders Gemini's answer: paragraphs, "-"/"*" bullet lists, **bold**, and
+ * Renders Gemini's answer: paragraphs, "-"/"*" bullet lists, **bold**, *italic*, and
  * citation markers like [1] or [2, 3] as buttons tied to the source margin.
  * Built as React nodes, so no model output is ever injected as raw HTML.
  */
@@ -16,7 +16,23 @@ type Props = {
   validNumbers?: Set<number>;
 };
 
-const TOKEN = /(\*\*[^*]+\*\*|\[\d+(?:\s*,\s*\d+)*\])/g;
+// Bold may contain *italic* inside it, so match up to the next "**", not the next "*".
+const TOKEN = /(\*\*(?:(?!\*\*).)+\*\*|\[\d+(?:\s*,\s*\d+)*\])/g;
+const ITALIC = /(\*[^*\s](?:[^*]*[^*\s])?\*)/g;
+
+/** Turns *italic* spans into <em>; any other text is left as it is. */
+function emphasis(text: string, key: string): ReactNode[] {
+  return text
+    .split(ITALIC)
+    .filter(Boolean)
+    .map((part, i) =>
+      part.length > 2 && part.startsWith("*") && part.endsWith("*") ? (
+        <em key={`${key}-em-${i}`}>{part.slice(1, -1)}</em>
+      ) : (
+        <Fragment key={`${key}-t-${i}`}>{part}</Fragment>
+      ),
+    );
+}
 const CITE = /^\[(\d+(?:\s*,\s*\d+)*)\]$/;
 const LEADING_PUNCT = /^[.,;:!?)]+/;
 
@@ -62,10 +78,10 @@ export default function AnswerText({ text, activeSource, onCite, onHover, validN
       }
       const part = citeNumbers(parts[i - 1]) ? raw.replace(LEADING_PUNCT, "") : raw;
       if (!part) return null;
-      if (part.startsWith("**") && part.endsWith("**")) {
-        return <strong key={k}>{part.slice(2, -2)}</strong>;
+      if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={k}>{emphasis(part.slice(2, -2), k)}</strong>;
       }
-      return <Fragment key={k}>{part}</Fragment>;
+      return <Fragment key={k}>{emphasis(part, k)}</Fragment>;
     });
   };
 
