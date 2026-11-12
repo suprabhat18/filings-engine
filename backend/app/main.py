@@ -121,7 +121,7 @@ def create_app(services: Services | None = None) -> FastAPI:
             user.uid, today(), s.settings.daily_user_quota, s.settings.daily_global_quota
         )
         if not quota.allowed:
-            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, f"Search limit: {quota.reason}.")
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, f"{quota.reason}.")
 
         started = time.monotonic()
         known = {c["ticker"] for c in s.store.list_companies()}

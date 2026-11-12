@@ -12,6 +12,7 @@ import {
   FORM_TYPES,
   filingFromCitation,
   formatDate,
+  type Me,
   type SearchResult,
 } from "@/lib/api";
 
@@ -49,6 +50,8 @@ export default function SearchView() {
   const [result, setResult] = useState<SearchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [slow, setSlow] = useState(false); // the backend may be starting up
+  const [quota, setQuota] = useState<{ used: number; limit: number } | null>(null);
   const [activeSource, setActiveSource] = useState<number | null>(null);
   const [hoverSource, setHoverSource] = useState<number | null>(null);
   const [saved, setSaved] = useState<Record<string, boolean>>({});
@@ -57,7 +60,21 @@ export default function SearchView() {
 
   useEffect(() => {
     api<Company[]>("companies").then(setCompanies).catch(() => setCompanies([]));
+    api<Me>("me")
+      .then((me) => setQuota({ used: me.searches_today, limit: me.daily_quota }))
+      .catch(() => undefined);
   }, []);
+
+  // The backend scales to zero when idle; the first search after a quiet spell
+  // includes its start-up. Explain the wait instead of leaving people guessing.
+  useEffect(() => {
+    if (!loading) {
+      setSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), 6000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   const runSearch = useCallback(
     async (q: string) => {
@@ -73,6 +90,7 @@ export default function SearchView() {
           body: { query: text, filters: { tickers, form_types: forms, from_year: fromYear } },
         });
         setResult(res);
+        setQuota((q) => (q ? { ...q, used: q.used + 1 } : q));
         router.replace(`/?q=${encodeURIComponent(text)}`, { scroll: false });
       } catch (e) {
         setResult(null);
@@ -257,11 +275,19 @@ export default function SearchView() {
         </fieldset>
       </form>
 
+      {quota && (
+        <p className="quota-note">
+          {Math.max(quota.limit - quota.used, 0)} of {quota.limit} searches left today
+        </p>
+      )}
+
       {error && <p className="notice notice--error" role="alert">{error}</p>}
 
       {loading && (
         <p className="reading" role="status">
-          Reading the filings and checking sources…
+          {slow
+            ? "Waking up the search service. The first search after a quiet spell can take up to 20 seconds…"
+            : "Reading the filings and checking sources…"}
         </p>
       )}
 

@@ -19,6 +19,11 @@ GOOGLE_OAUTH_CLIENT_ID="xxxxxxxx.apps.googleusercontent.com"
 # Optional: comma-separated emails allowed to sign in; empty = any Google account
 ALLOWED_EMAILS=""
 
+# Search limits. Each search costs roughly half a US cent (Vertex AI Search + Gemini),
+# so 200 a day caps spending at about $1/day even if a post goes viral.
+DAILY_USER_QUOTA="20"
+DAILY_GLOBAL_QUOTA="200"
+
 # Your deployed frontend URL (fill in after the first Vercel deploy)
 FRONTEND_URL="https://your-app.vercel.app"
 

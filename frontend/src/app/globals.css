@@ -596,6 +596,35 @@ a {
   color: var(--slate);
 }
 
+.quota-note {
+  margin: 0.75rem 0 0;
+  color: var(--slate);
+  font-size: var(--t-sm);
+}
+
+.site-footer {
+  /* Same width as the page content, so the rule lines up with the text above. */
+  width: min(calc(76rem - 2 * var(--gutter)), calc(100% - 2 * var(--gutter)));
+  margin: 0 auto;
+  padding: 1.5rem 0 2.5rem;
+  border-top: 1px solid var(--rule);
+  color: var(--slate);
+  font-size: var(--t-sm);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 2rem;
+}
+
+.site-footer p {
+  margin: 0;
+  max-width: 60ch;
+}
+
+.site-footer a {
+  color: var(--link);
+}
+
 /* ---------------------------------------------------------------- result */
 
 .result {

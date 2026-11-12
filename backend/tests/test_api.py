@@ -205,10 +205,10 @@ def test_daily_user_and_global_quota():
     carol = {"Authorization": "Bearer good-carol"}
     assert client.post("/search", json={"query": "risk"}, headers=AUTH).status_code == 200
     r = client.post("/search", json={"query": "risk"}, headers=AUTH)
-    assert r.status_code == 429 and "your account" in r.json()["detail"]
+    assert r.status_code == 429 and "this account" in r.json()["detail"]
     assert client.post("/search", json={"query": "risk"}, headers=bob).status_code == 200
     r = client.post("/search", json={"query": "risk"}, headers=carol)
-    assert r.status_code == 429 and "service" in r.json()["detail"]
+    assert r.status_code == 429 and "across all visitors" in r.json()["detail"]
 
 
 def test_sliding_window_frees_slots_over_time():

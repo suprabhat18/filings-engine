@@ -81,9 +81,9 @@ class MemoryStore:
         with self._lock:
             used = self.searches_on(uid, day)
             if used >= user_limit:
-                return QuotaResult(False, used, "daily limit reached for your account")
+                return QuotaResult(False, used, "You've used all your searches for today on this account. They reset at midnight UTC")
             if self.usage.get(day, 0) >= global_limit:
-                return QuotaResult(False, used, "the service's daily limit has been reached")
+                return QuotaResult(False, used, "This demo has reached its daily search limit across all visitors, which keeps its costs down. Please try again tomorrow")
             self.users.setdefault(uid, {})["usage"] = {"day": day, "count": used + 1}
             self.usage[day] = self.usage.get(day, 0) + 1
             return QuotaResult(True, used + 1)
@@ -166,10 +166,10 @@ class FirestoreStore:
             usage = user.get("usage") or {}
             used = usage.get("count", 0) if usage.get("day") == day else 0
             if used >= user_limit:
-                return QuotaResult(False, used, "daily limit reached for your account")
+                return QuotaResult(False, used, "You've used all your searches for today on this account. They reset at midnight UTC")
             total = (usage_ref.get(transaction=transaction).to_dict() or {}).get("count", 0)
             if total >= global_limit:
-                return QuotaResult(False, used, "the service's daily limit has been reached")
+                return QuotaResult(False, used, "This demo has reached its daily search limit across all visitors, which keeps its costs down. Please try again tomorrow")
             transaction.set(user_ref, {"usage": {"day": day, "count": used + 1}}, merge=True)
             transaction.set(usage_ref, {"count": total + 1}, merge=True)
             return QuotaResult(True, used + 1)
