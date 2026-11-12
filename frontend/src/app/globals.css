@@ -625,6 +625,35 @@ a {
   color: var(--link);
 }
 
+.site-footer__links {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.legal {
+  max-width: var(--measure);
+  font-family: var(--serif);
+  line-height: 1.6;
+}
+
+.legal h2 {
+  font-family: var(--sans);
+  font-size: var(--t-md);
+  margin: 2rem 0 0;
+}
+
+.legal ul {
+  padding-left: 1.25rem;
+}
+
+.legal li + li {
+  margin-top: 0.5rem;
+}
+
+.legal a {
+  color: var(--link);
+}
+
 /* ---------------------------------------------------------------- result */
 
 .result {
