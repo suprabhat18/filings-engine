@@ -3,10 +3,30 @@ import Header from "@/components/Header";
 import Providers from "./providers";
 import "./globals.css";
 
+const SITE_URL = process.env.NEXTAUTH_URL ?? "https://filings-engine.vercel.app";
+const TITLE = "Filings Research";
+const DESCRIPTION =
+  "Ask questions in any language about S&P 100 SEC filings and get answers that cite their sources.";
+
+// The Open Graph and Twitter tags are what LinkedIn, WhatsApp, Slack and X read to
+// build a link preview card; the image comes from app/opengraph-image.tsx.
 export const metadata: Metadata = {
-  title: "Filings Research",
-  description:
-    "Ask questions in any language about S&P 100 SEC filings and get answers that cite their sources.",
+  metadataBase: new URL(SITE_URL),
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: TITLE,
+    title: `${TITLE}: ask the SEC filings, in any language`,
+    description: DESCRIPTION,
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${TITLE}: ask the SEC filings, in any language`,
+    description: DESCRIPTION,
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
