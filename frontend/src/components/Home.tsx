@@ -278,10 +278,6 @@ export default function Home() {
             <span className="stat__label">{t.home.statCompanies}</span>
           </li>
           <li className="stat">
-            <span className="stat__value">{number.format(6)}</span>
-            <span className="stat__label">{t.home.statLanguages}</span>
-          </li>
-          <li className="stat">
             <span className="stat__value stat__value--date">{stats?.updated_at ? formatDate(stats.updated_at) : "—"}</span>
             <span className="stat__label">{t.home.statUpdated}</span>
           </li>

@@ -38,7 +38,6 @@ const zh: Dict = {
     statsLabel: "覆盖范围",
     statFilings: "份文件",
     statCompanies: "家公司",
-    statLanguages: "种语言",
     statUpdated: "最近更新",
     suggestedTitle: "推荐问题",
     suggested: ["英伟达面临的最大风险是什么？", "Alphabet 在股票回购上花了多少钱？", "哪些公司在最新的10-Q中提到了关税？", "特斯拉最近的8-K披露了什么？"],

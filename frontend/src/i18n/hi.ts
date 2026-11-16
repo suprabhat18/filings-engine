@@ -43,7 +43,6 @@ const hi: Dict = {
     statsLabel: "दायरा",
     statFilings: "फ़ाइलिंग्स",
     statCompanies: "कंपनियाँ",
-    statLanguages: "भाषाएँ",
     statUpdated: "आख़िरी अपडेट",
     suggestedTitle: "सुझाए गए सवाल",
     suggested: [

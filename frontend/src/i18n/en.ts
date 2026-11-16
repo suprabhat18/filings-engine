@@ -46,7 +46,6 @@ const en = {
     statsLabel: "Coverage",
     statFilings: "filings",
     statCompanies: "companies",
-    statLanguages: "languages",
     statUpdated: "Last updated",
     suggestedTitle: "Suggested questions",
     suggested: [

@@ -43,7 +43,6 @@ const de: Dict = {
     statsLabel: "Umfang",
     statFilings: "Berichte",
     statCompanies: "Unternehmen",
-    statLanguages: "Sprachen",
     statUpdated: "Zuletzt aktualisiert",
     suggestedTitle: "Vorgeschlagene Fragen",
     suggested: [

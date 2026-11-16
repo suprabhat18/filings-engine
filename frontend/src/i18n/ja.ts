@@ -41,7 +41,6 @@ const ja: Dict = {
     statsLabel: "収録範囲",
     statFilings: "件の書類",
     statCompanies: "社",
-    statLanguages: "言語",
     statUpdated: "最終更新",
     suggestedTitle: "おすすめの質問",
     suggested: [
