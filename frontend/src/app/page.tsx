@@ -1,13 +1,19 @@
+import { getServerSession } from "next-auth";
 import { Suspense } from "react";
-import RequireSignIn from "@/components/RequireSignIn";
+import Home from "@/components/Home";
 import SearchView from "@/components/SearchView";
+import { authOptions } from "@/lib/auth";
 
-export default function SearchPage() {
+/**
+ * Signed-in users land on search; everyone else sees the public homepage.
+ * Decided on the server, so neither flashes before the other.
+ */
+export default async function IndexPage() {
+  const session = await getServerSession(authOptions);
+  if (!session || session.error) return <Home />;
   return (
-    <RequireSignIn>
-      <Suspense fallback={null}>
-        <SearchView />
-      </Suspense>
-    </RequireSignIn>
+    <Suspense fallback={null}>
+      <SearchView />
+    </Suspense>
   );
 }

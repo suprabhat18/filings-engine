@@ -5,7 +5,10 @@ Run locally:  uvicorn app.main:app --reload --port 8000
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -13,17 +16,22 @@ from dataclasses import dataclass
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .auth import TokenVerifier, current_user
 from .config import Settings, get_settings
+from .errors import FREE_LIMIT, FREE_USED, GLOBAL_QUOTA, USER_QUOTA, ApiError
 from .llm import LLM
 from .models import (
     Bookmark,
     BookmarkIn,
     Company,
     Filing,
+    FreeSearchRequest,
     HistoryEntry,
     Me,
+    PublicStats,
+    SearchFilters,
     SearchRequest,
     SearchResponse,
     User,
@@ -35,6 +43,9 @@ from .retrieval import Retriever, valid_ticker
 from .store import Store, today
 
 log = logging.getLogger("filings")
+
+_VISITOR_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+STATS_CACHE_SECONDS = 600
 
 
 @dataclass
@@ -81,6 +92,7 @@ def create_app(services: Services | None = None) -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
+    stats_cache: dict[str, object] = {}
 
     def svc(request: Request) -> Services:
         return request.app.state.services
@@ -107,33 +119,36 @@ def create_app(services: Services | None = None) -> FastAPI:
 
     # ------------------------------------------------------------ search
 
+    def answer_question(s: Services, query: str, filters: SearchFilters, who: str):
+        """Plan, retrieve and answer. Shared by signed-in and free searches."""
+        started = time.monotonic()
+        known = {c["ticker"] for c in s.store.list_companies()}
+        try:
+            result = run_search(query, filters, s.llm, s.retriever, known, s.settings.results_per_query)
+        except Exception:
+            log.exception("search failed")
+            raise ApiError(status.HTTP_502_BAD_GATEWAY, "search_unavailable",
+                           "Search is temporarily unavailable.")
+        log.info("search who=%s ms=%d results=%d", who, (time.monotonic() - started) * 1000, len(result[3]))
+        return result
+
     @app.post("/search", response_model=SearchResponse)
     def search(body: SearchRequest, request: Request, user: User = Depends(signed_in)) -> SearchResponse:
         s = svc(request)
         retry_after = s.limiter.hit(user.uid)
         if retry_after:
-            raise HTTPException(
-                status.HTTP_429_TOO_MANY_REQUESTS,
-                f"Too many searches. Try again in {int(retry_after) + 1} seconds.",
-                headers={"Retry-After": str(int(retry_after) + 1)},
-            )
+            wait = int(retry_after) + 1
+            raise ApiError(status.HTTP_429_TOO_MANY_REQUESTS, "rate_limited",
+                           f"Too many searches. Try again in {wait} seconds.",
+                           headers={"Retry-After": str(wait)})
         quota = s.store.consume_quota(
             user.uid, today(), s.settings.daily_user_quota, s.settings.daily_global_quota
         )
         if not quota.allowed:
-            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, f"{quota.reason}.")
+            raise ApiError(status.HTTP_429_TOO_MANY_REQUESTS, quota.reason,
+                           USER_QUOTA if quota.reason == "user_quota" else GLOBAL_QUOTA)
 
-        started = time.monotonic()
-        known = {c["ticker"] for c in s.store.list_companies()}
-        try:
-            plan, filters, answer, citations = run_search(
-                body.query, body.filters, s.llm, s.retriever, known, s.settings.results_per_query
-            )
-        except Exception:
-            log.exception("search failed")
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Search is temporarily unavailable.")
-        log.info("search uid=%s ms=%d results=%d", user.uid, (time.monotonic() - started) * 1000, len(citations))
-
+        plan, filters, answer, citations = answer_question(s, body.query, body.filters, f"uid:{user.uid}")
         history_id = s.store.add_history(user.uid, {
             "query": body.query,
             "language": plan.language,
@@ -166,15 +181,15 @@ def create_app(services: Services | None = None) -> FastAPI:
         ticker = ticker.upper()
         company = next((c for c in s.store.list_companies() if c["ticker"] == ticker), None)
         if not valid_ticker(ticker) or company is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, f"{ticker} is not in the index")
+            raise ApiError(status.HTTP_404_NOT_FOUND, "not_in_index", f"{ticker} is not in the index")
         if len(s.store.get_watchlist(user.uid)) >= 30:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Watchlists hold up to 30 companies")
+            raise ApiError(status.HTTP_400_BAD_REQUEST, "watchlist_full", "Watchlists hold up to 30 companies")
         return s.store.add_watch(user.uid, ticker, company["name"])
 
     @app.delete("/watchlist/{ticker}", status_code=204)
     def remove_watch(ticker: str, request: Request, user: User = Depends(signed_in)):
         if not svc(request).store.remove_watch(user.uid, ticker.upper()):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not on your watchlist")
+            raise ApiError(status.HTTP_404_NOT_FOUND, "not_on_watchlist", "Not on your watchlist")
 
     @app.get("/watchlist/filings", response_model=list[Filing])
     def watchlist_filings(request: Request, limit: int = 25, user: User = Depends(signed_in)):
@@ -193,7 +208,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     def add_bookmark(body: BookmarkIn, request: Request, user: User = Depends(signed_in)):
         s = svc(request)
         if len(s.store.list_bookmarks(user.uid)) >= 200:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bookmark limit (200) reached")
+            raise ApiError(status.HTTP_400_BAD_REQUEST, "bookmark_limit", "Bookmark limit (200) reached")
         if body.kind == "filing" and body.filing is None:
             raise HTTPException(422, "A filing bookmark needs `filing`")
         if body.kind == "answer" and not body.answer:
@@ -203,7 +218,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.delete("/bookmarks/{bookmark_id}", status_code=204)
     def delete_bookmark(bookmark_id: str, request: Request, user: User = Depends(signed_in)):
         if not svc(request).store.delete_bookmark(user.uid, bookmark_id):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Bookmark not found")
+            raise ApiError(status.HTTP_404_NOT_FOUND, "bookmark_not_found", "Bookmark not found")
 
     # ------------------------------------------------------------ history
 
@@ -215,12 +230,100 @@ def create_app(services: Services | None = None) -> FastAPI:
     def clear_history(request: Request, user: User = Depends(signed_in)) -> dict:
         return {"deleted": svc(request).store.clear_history(user.uid)}
 
+    # ------------------------------------------------------------ public (no sign-in)
+
+    @app.get("/public/stats", response_model=PublicStats)
+    def public_stats(request: Request) -> PublicStats:
+        """Live numbers for the homepage, cached so visits don't hit Firestore."""
+        s = svc(request)
+        cached = stats_cache.get("value")
+        if cached and time.monotonic() - stats_cache["at"] < STATS_CACHE_SECONDS:
+            return cached
+        value = PublicStats(
+            filings=s.store.count_filings(),
+            companies=len(s.store.list_companies()),
+            updated_at=s.store.index_updated_at(),
+        )
+        stats_cache.update(value=value, at=time.monotonic())
+        return value
+
+    @app.post("/public/try", response_model=SearchResponse)
+    def free_search(body: FreeSearchRequest, request: Request) -> SearchResponse:
+        """One free question from the homepage, without signing in.
+
+        Only the website's server may call this (shared secret), because it is the one
+        that knows the visitor's browser id and network address. Limits: one per
+        browser and a few per network per day, plus a daily total for everyone.
+        Nothing is saved to any history.
+        """
+        s = svc(request)
+        cfg = s.settings
+        sent = request.headers.get("x-proxy-secret", "")
+        if not cfg.proxy_secret or not hmac.compare_digest(sent, cfg.proxy_secret):
+            raise ApiError(status.HTTP_403_FORBIDDEN, "free_unavailable", "Free questions are not available.")
+        query = body.query.strip()
+        if len(query) > cfg.free_max_chars:
+            raise ApiError(422, "free_too_long",
+                           f"Free questions can be up to {cfg.free_max_chars} characters.")
+        visitor = request.headers.get("x-visitor-id", "")
+        network = request.headers.get("x-client-ip", "")
+        if not _VISITOR_ID.match(visitor) or not network:
+            raise ApiError(400, "free_unavailable", "Free questions are not available.")
+        if cfg.turnstile_secret and not verify_turnstile(cfg.turnstile_secret, body.turnstile_token, network):
+            raise ApiError(status.HTTP_403_FORBIDDEN, "bot_check_failed",
+                           "The automatic check didn't pass. Please reload the page and try again.")
+
+        day = today()
+        # The network address is only kept as a one-way hash, reset daily.
+        net_key = "n_" + hashlib.sha256(f"{day}|{network}".encode()).hexdigest()[:32]
+        reason = s.store.consume_free(day, "v_" + visitor, net_key, cfg.free_per_visitor,
+                                      cfg.free_per_network, cfg.free_daily_total)
+        if reason:
+            raise ApiError(status.HTTP_429_TOO_MANY_REQUESTS, reason,
+                           FREE_USED if reason == "free_used" else FREE_LIMIT)
+
+        plan, filters, answer, citations = answer_question(s, query, SearchFilters(), "free")
+        return SearchResponse(
+            query=query,
+            language=plan.language,
+            search_query=plan.search_query,
+            filters=filters,
+            answer=answer,
+            citations=citations,
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request: Request, exc: StarletteHTTPException):
+        body = {"detail": exc.detail}
+        if getattr(exc, "code", None):
+            body["code"] = exc.code
+        return JSONResponse(body, status_code=exc.status_code, headers=getattr(exc, "headers", None))
+
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):  # pragma: no cover
         log.exception("unhandled error")
         return JSONResponse({"detail": "Internal error"}, status_code=500)
 
     return app
+
+
+
+def verify_turnstile(secret: str, token: str, ip: str) -> bool:
+    """Check a Cloudflare Turnstile token (the free, invisible bot check)."""
+    if not token:
+        return False
+    import requests
+
+    try:
+        r = requests.post(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data={"secret": secret, "response": token, "remoteip": ip},
+            timeout=10,
+        )
+        return bool(r.json().get("success"))
+    except Exception:  # network trouble: fail closed, the visitor can retry
+        log.exception("turnstile check failed")
+        return False
 
 
 app = create_app()  # uvicorn entry point: app.main:app

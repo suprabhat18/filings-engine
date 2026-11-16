@@ -3,16 +3,18 @@
 import { useEffect, useState } from "react";
 import AnswerText from "@/components/AnswerText";
 import RequireSignIn from "@/components/RequireSignIn";
-import { api, ApiError, type Bookmark, formatDate } from "@/lib/api";
+import { api, type Bookmark } from "@/lib/api";
+import { useI18n } from "@/i18n/I18nProvider";
 
 function Bookmarks() {
+  const { t, formatDate, errorText } = useI18n();
   const [items, setItems] = useState<Bookmark[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api<Bookmark[]>("bookmarks")
       .then(setItems)
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Couldn't load bookmarks."));
+      .catch((e) => setError(errorText(e, "loadBookmarks")));
   }, []);
 
   const remove = async (id: string) => {
@@ -20,29 +22,27 @@ function Bookmarks() {
       await api(`bookmarks/${id}`, { method: "DELETE" });
       setItems((list) => list?.filter((b) => b.id !== id) ?? null);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Couldn't remove the bookmark.");
+      setError(errorText(e, "removeBookmark"));
     }
   };
 
   return (
     <div className="stack">
-      <h1 className="page-title">Bookmarks</h1>
+      <h1 className="page-title">{t.bookmarks.title}</h1>
       {error && <p className="notice notice--error" role="alert">{error}</p>}
-      {items === null && !error && <p className="muted" role="status">Loading…</p>}
+      {items === null && !error && <p className="muted" role="status">{t.common.loading}</p>}
       {items?.length === 0 && (
-        <p className="empty">
-          Nothing saved yet. Use “Save answer” or “Save filing” on a search result to keep it here.
-        </p>
+        <p className="empty">{t.bookmarks.empty}</p>
       )}
       <ul className="bookmarks">
         {items?.map((b) => (
           <li key={b.id} className="bookmark">
             <div className="bookmark__head">
               <p className="bookmark__kind">
-                {b.kind === "answer" ? "Answer" : "Filing"}, saved {formatDate(b.created_at)}
+                {t.bookmarks.savedOn(b.kind === "answer" ? t.bookmarks.answer : t.bookmarks.filing, formatDate(b.created_at))}
               </p>
               <button type="button" className="link-button" onClick={() => remove(b.id)}>
-                Remove
+                {t.common.remove}
               </button>
             </div>
             {b.kind === "answer" ? (
@@ -54,7 +54,7 @@ function Bookmarks() {
                     {b.citations.map((c) => (
                       <li key={c.n} value={c.n}>
                         <a href={c.source_url} target="_blank" rel="noreferrer">
-                          {c.company_name} {c.form_type}, filed {formatDate(c.filing_date)}
+                          {t.bookmarks.filingLine(c.company_name, c.form_type, formatDate(c.filing_date))}
                         </a>
                       </li>
                     ))}
@@ -65,7 +65,7 @@ function Bookmarks() {
               b.filing && (
                 <p className="bookmark__title">
                   <a href={b.filing.source_url} target="_blank" rel="noreferrer">
-                    {b.filing.company_name} {b.filing.form_type}, filed {formatDate(b.filing.filing_date)}
+                    {t.bookmarks.filingLine(b.filing.company_name, b.filing.form_type, formatDate(b.filing.filing_date))}
                   </a>
                 </p>
               )

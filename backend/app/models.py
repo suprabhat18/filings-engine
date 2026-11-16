@@ -29,6 +29,19 @@ class SearchRequest(BaseModel):
     filters: SearchFilters = Field(default_factory=SearchFilters)
 
 
+class FreeSearchRequest(BaseModel):
+    """A free question from the public homepage. Its length limit is checked in the route."""
+
+    query: str = Field(min_length=2, max_length=1000)
+    turnstile_token: str = ""
+
+
+class PublicStats(BaseModel):
+    filings: int
+    companies: int
+    updated_at: str | None = None
+
+
 class QueryPlan(BaseModel):
     """What Gemini extracts from the user's question before searching."""
 

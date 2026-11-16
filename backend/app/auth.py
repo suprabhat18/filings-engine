@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from typing import Callable
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Request, status
+
+from .errors import ApiError
 
 from .models import User
 
@@ -32,12 +34,12 @@ class GoogleTokenVerifier:
         try:
             claims = id_token.verify_oauth2_token(token, self._transport, audience=self._client_id)
         except ValueError as exc:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired sign-in") from exc
+            raise ApiError(status.HTTP_401_UNAUTHORIZED, "invalid_sign_in", "Invalid or expired sign-in") from exc
         if not claims.get("email_verified"):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Google email is not verified")
+            raise ApiError(status.HTTP_401_UNAUTHORIZED, "email_unverified", "Google email is not verified")
         email = claims["email"].lower()
         if self._allowed and email not in self._allowed:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "This account is not on the access list")
+            raise ApiError(status.HTTP_403_FORBIDDEN, "not_on_access_list", "This account is not on the access list")
         return User(
             uid=claims["sub"],
             email=email,
@@ -50,8 +52,9 @@ def current_user(request: Request) -> User:
     header = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
     if scheme.lower() != "bearer" or not token:
-        raise HTTPException(
+        raise ApiError(
             status.HTTP_401_UNAUTHORIZED,
+            "sign_in_required",
             "Sign in required",
             headers={"WWW-Authenticate": "Bearer"},
         )

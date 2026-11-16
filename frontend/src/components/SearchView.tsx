@@ -5,16 +5,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AnswerText from "@/components/AnswerText";
 import {
   api,
-  ApiError,
   type Citation,
   type Company,
   type Filters,
   FORM_TYPES,
   filingFromCitation,
-  formatDate,
   type Me,
   type SearchResult,
 } from "@/lib/api";
+import type { Dict } from "@/i18n";
+import { useI18n } from "@/i18n/I18nProvider";
 
 const EXAMPLES = [
   "How does Microsoft describe its AI infrastructure spending?",
@@ -26,19 +26,20 @@ const EXAMPLES = [
 const THIS_YEAR = new Date().getFullYear();
 const YEARS = [THIS_YEAR, THIS_YEAR - 1, THIS_YEAR - 2];
 
-function describeFilters(f: Filters, companies: Company[]): string {
+function describeFilters(f: Filters, companies: Company[], t: Dict): string {
   const parts: string[] = [];
   if (f.tickers.length) {
-    parts.push(f.tickers.map((t) => companies.find((c) => c.ticker === t)?.name ?? t).join(", "));
+    parts.push(f.tickers.map((tk) => companies.find((c) => c.ticker === tk)?.name ?? tk).join(", "));
   }
-  if (f.form_types.length) parts.push(f.form_types.join(" and "));
-  if (f.from_year) parts.push(`filed since ${f.from_year}`);
+  if (f.form_types.length) parts.push(f.form_types.join(t.search.and));
+  if (f.from_year) parts.push(t.search.since(f.from_year));
   return parts.join(", ");
 }
 
 export default function SearchView() {
   const params = useSearchParams();
   const router = useRouter();
+  const { t, formatDate, errorText } = useI18n();
 
   const [query, setQuery] = useState(params.get("q") ?? "");
   const [tickers, setTickers] = useState<string[]>(params.getAll("ticker"));
@@ -94,12 +95,12 @@ export default function SearchView() {
         router.replace(`/?q=${encodeURIComponent(text)}`, { scroll: false });
       } catch (e) {
         setResult(null);
-        setError(e instanceof ApiError ? e.message : "The search failed. Check your connection and try again.");
+        setError(errorText(e, "network"));
       } finally {
         setLoading(false);
       }
     },
-    [tickers, forms, fromYear, router],
+    [tickers, forms, fromYear, router, errorText],
   );
 
   // Re-run a search opened from History (?q=...&run=1)
@@ -149,7 +150,7 @@ export default function SearchView() {
       });
       setSaved((s) => ({ ...s, answer: true }));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Couldn't save the answer.");
+      setError(errorText(e, "saveAnswer"));
     }
   };
 
@@ -161,7 +162,7 @@ export default function SearchView() {
       });
       setSaved((s) => ({ ...s, [c.filing_id]: true }));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Couldn't save the filing.");
+      setError(errorText(e, "saveFiling"));
     }
   };
 
@@ -177,7 +178,7 @@ export default function SearchView() {
         }}
       >
         <label htmlFor="q" className="ask__label">
-          Ask about S&amp;P 100 filings, in any language
+          {t.search.label}
         </label>
         <div className="ask__row">
           <textarea
@@ -186,7 +187,7 @@ export default function SearchView() {
             rows={2}
             maxLength={500}
             value={query}
-            placeholder="How does Microsoft describe its AI infrastructure spending?"
+            placeholder={t.search.placeholder}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -196,31 +197,31 @@ export default function SearchView() {
             }}
           />
           <button type="submit" className="btn btn--primary" disabled={loading || query.trim().length < 2}>
-            {loading ? "Searching…" : "Search"}
+            {loading ? t.search.searching : t.search.submit}
           </button>
         </div>
 
         <fieldset className="filters">
-          <legend className="visually-hidden">Narrow the search</legend>
+          <legend className="visually-hidden">{t.search.narrow}</legend>
           <div className="filters__group">
-            <label htmlFor="company" className="filters__label">Companies</label>
+            <label htmlFor="company" className="filters__label">{t.search.companies}</label>
             <div className="chips">
-              {tickers.map((t) => (
+              {tickers.map((tk) => (
                 <button
-                  key={t}
+                  key={tk}
                   type="button"
                   className="chip"
-                  onClick={() => setTickers(tickers.filter((x) => x !== t))}
-                  aria-label={`Remove ${t}`}
+                  onClick={() => setTickers(tickers.filter((x) => x !== tk))}
+                  aria-label={t.search.removeTicker(tk)}
                 >
-                  {t} <span aria-hidden="true">×</span>
+                  {tk} <span aria-hidden="true">×</span>
                 </button>
               ))}
               <input
                 id="company"
                 list="company-list"
                 className="chips__input"
-                placeholder={tickers.length ? "Add another" : "Any company"}
+                placeholder={tickers.length ? t.search.addAnother : t.search.anyCompany}
                 value={companyInput}
                 onChange={(e) => {
                   setCompanyInput(e.target.value);
@@ -242,7 +243,7 @@ export default function SearchView() {
           </div>
 
           <div className="filters__group">
-            <span className="filters__label" id="forms-label">Filing types</span>
+            <span className="filters__label" id="forms-label">{t.search.filingTypes}</span>
             <div className="toggle-row" role="group" aria-labelledby="forms-label">
               {FORM_TYPES.map((f) => (
                 <button
@@ -259,14 +260,14 @@ export default function SearchView() {
           </div>
 
           <div className="filters__group">
-            <label htmlFor="year" className="filters__label">Filed since</label>
+            <label htmlFor="year" className="filters__label">{t.search.filedSince}</label>
             <select
               id="year"
               className="select"
               value={fromYear ?? ""}
               onChange={(e) => setFromYear(e.target.value ? Number(e.target.value) : null)}
             >
-              <option value="">Any time</option>
+              <option value="">{t.search.anyTime}</option>
               {YEARS.map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
@@ -277,7 +278,7 @@ export default function SearchView() {
 
       {quota && (
         <p className="quota-note">
-          {Math.max(quota.limit - quota.used, 0)} of {quota.limit} searches left today
+          {t.search.left(Math.max(quota.limit - quota.used, 0), quota.limit)}
         </p>
       )}
 
@@ -285,15 +286,13 @@ export default function SearchView() {
 
       {loading && (
         <p className="reading" role="status">
-          {slow
-            ? "Waking up the search service. The first search after a quiet spell can take up to 20 seconds…"
-            : "Reading the filings and checking sources…"}
+          {slow ? t.search.wakingUp : t.search.reading}
         </p>
       )}
 
       {!result && !loading && !error && (
-        <section className="examples" aria-label="Example questions">
-          <p className="muted">Try one of these:</p>
+        <section className="examples" aria-label={t.search.examplesLabel}>
+          <p className="muted">{t.search.tryOne}</p>
           <ul>
             {EXAMPLES.map((ex) => (
               <li key={ex}>
@@ -319,12 +318,11 @@ export default function SearchView() {
             <h1 className="answer__question">{result.query}</h1>
             <p className="answer__meta">
               {result.language.toLowerCase().startsWith("en")
-                ? `Searched for “${result.search_query}”`
-                : `Answered in ${result.language}. Searched in English for “${result.search_query}”`}
-              {describeFilters(result.filters, companies) && (
-                <> in {describeFilters(result.filters, companies)}</>
-              )}
-              {result.filters.inferred && " (filters taken from your question)"}.
+                ? t.search.searchedFor(result.search_query)
+                : t.search.answeredIn(result.language, result.search_query)}
+              {describeFilters(result.filters, companies, t) &&
+                t.search.inScope(describeFilters(result.filters, companies, t))}
+              {result.filters.inferred && t.search.inferred}.
             </p>
             <AnswerText
               text={result.answer}
@@ -335,14 +333,14 @@ export default function SearchView() {
             />
             <div className="answer__actions">
               <button type="button" className="btn" onClick={saveAnswer} disabled={saved.answer}>
-                {saved.answer ? "Answer saved" : "Save answer"}
+                {saved.answer ? t.search.answerSaved : t.search.saveAnswer}
               </button>
             </div>
           </div>
 
           {sources.length > 0 && (
-            <aside className="sources" aria-label="Sources">
-              <h2 className="sources__title">Sources</h2>
+            <aside className="sources" aria-label={t.search.sources}>
+              <h2 className="sources__title">{t.search.sources}</h2>
               <ol className="sources__list">
                 {sources.map((c) => (
                   <li
@@ -354,20 +352,20 @@ export default function SearchView() {
                     data-active={highlighted === c.n || undefined}
                     data-cited={c.cited || undefined}
                   >
-                    <span className="source__n" aria-label={`Source ${c.n}`}>{c.n}</span>
+                    <span className="source__n" aria-label={t.search.sourceN(c.n)}>{c.n}</span>
                     <div className="source__body">
                       <p className="source__title">
                         {c.company_name || c.ticker} <span className="source__form">{c.form_type}</span>
                         {c.section && <span className="source__section">, {c.section}</span>}
                       </p>
-                      <p className="source__date">Filed {formatDate(c.filing_date)}</p>
+                      <p className="source__date">{t.search.filed(formatDate(c.filing_date))}</p>
                       <blockquote className="source__excerpt">
                         {c.content.length > 320 ? `${c.content.slice(0, 320).trim()}…` : c.content}
                       </blockquote>
                       <p className="source__links">
                         {c.source_url && (
                           <a href={c.source_url} target="_blank" rel="noreferrer">
-                            Open filing on SEC.gov
+                            {t.search.openOnSec}
                           </a>
                         )}
                         <button
@@ -376,7 +374,7 @@ export default function SearchView() {
                           onClick={() => saveFiling(c)}
                           disabled={saved[c.filing_id]}
                         >
-                          {saved[c.filing_id] ? "Filing saved" : "Save filing"}
+                          {saved[c.filing_id] ? t.search.filingSaved : t.search.saveFiling}
                         </button>
                       </p>
                     </div>
@@ -384,7 +382,7 @@ export default function SearchView() {
                 ))}
               </ol>
               {sources.some((c) => !c.cited) && (
-                <p className="fine-print">Sources the answer didn’t cite are listed last.</p>
+                <p className="fine-print">{t.search.uncitedLast}</p>
               )}
             </aside>
           )}

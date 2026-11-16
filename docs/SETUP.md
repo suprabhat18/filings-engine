@@ -122,6 +122,9 @@ check that should say `{"status":"ok"}`.
    | `NEXTAUTH_SECRET` | a random string: run `openssl rand -base64 32` |
    | `NEXTAUTH_URL` | your Vercel URL, e.g. `https://filings-research.vercel.app` |
    | `BACKEND_URL` | the backend URL from step 6 |
+   | `PROXY_SECRET` | the same random string as `PROXY_SECRET` in `deploy/config.sh` (enables the free question on the homepage) |
+   | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | optional: Cloudflare Turnstile site key (bot check for free questions) |
+   | `NEXT_PUBLIC_LINKEDIN_URL` | optional: your LinkedIn profile, linked in the footer |
 
 4. Deploy. Then finish the wiring with your Vercel URL:
    - In the OAuth client (step 5), add the URL to **Authorized JavaScript origins** and

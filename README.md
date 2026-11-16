@@ -16,6 +16,13 @@ Cloud Run, Cloud Scheduler) · FastAPI (Python) · Next.js (TypeScript)
 - **Incremental ingestion on demand.** One command (`python -m edgar.update`) checks SEC
   EDGAR for new filings, downloads only the ones not already in the Firestore catalog,
   splits them into section-labelled passages and imports them into the index.
+- **Public homepage with a free question.** Visitors can ask one question without
+  signing in, then sign in with Google to keep asking. Free questions are limited per
+  browser, per network (stored only as a one-way hash) and per day, can only come through
+  the website's server (shared secret), and can require a Cloudflare Turnstile check.
+- **Six languages, dark by default.** The whole site switches in place between English,
+  中文, Deutsch, 日本語, Español and हिन्दी (a missing translation fails the build), and
+  between dark and light mode. Both are chosen on the server, so pages never flash.
 - **Google OAuth 2.0 sign-in** with per-user rate limiting and daily quotas.
 - **Firestore-backed watchlists, bookmarks and search history.** Follow companies to see
   their latest filings, save answers or filings, and re-run past searches.
@@ -82,7 +89,7 @@ Cloud Run, Cloud Scheduler) · FastAPI (Python) · Next.js (TypeScript)
 
 ```bash
 cd ingestion && python -m pytest     # 21 tests: EDGAR parsing, cleaning, passages, publishing, updates
-cd backend && python -m pytest       # 25 tests: auth, RAG pipeline, filters, limits, user data
+cd backend && python -m pytest       # 31 tests: auth, RAG pipeline, filters, limits, free questions, user data
 cd frontend && npm run typecheck && npm run build
 ```
 

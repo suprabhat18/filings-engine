@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import RequireSignIn from "@/components/RequireSignIn";
-import { api, ApiError, type Company, type Filing, formatDate, type Me, type WatchItem } from "@/lib/api";
+import { api, type Company, type Filing, type Me, type WatchItem } from "@/lib/api";
+import { useI18n } from "@/i18n/I18nProvider";
 
 function Watchlist() {
+  const { t, formatDate, errorText } = useI18n();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [items, setItems] = useState<WatchItem[]>([]);
   const [filings, setFilings] = useState<Filing[]>([]);
@@ -27,7 +29,7 @@ function Watchlist() {
     // "Last updated" is a nice-to-have: never let it block the page.
     api<Me>("me").then((me) => setUpdatedAt(me.index_updated_at)).catch(() => undefined);
     Promise.all([api<Company[]>("companies").then(setCompanies), reload()])
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Couldn't load your watchlist."))
+      .catch((e) => setError(errorText(e, "loadWatchlist")))
       .finally(() => setLoading(false));
   }, []);
 
@@ -39,7 +41,7 @@ function Watchlist() {
       setChoice("");
       await reload();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Couldn't add the company.");
+      setError(errorText(e, "addCompany"));
     }
   };
 
@@ -49,7 +51,7 @@ function Watchlist() {
       await api(`watchlist/${encodeURIComponent(ticker)}`, { method: "DELETE" });
       await reload();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Couldn't remove the company.");
+      setError(errorText(e, "removeCompany"));
     }
   };
 
@@ -58,10 +60,10 @@ function Watchlist() {
 
   return (
     <div className="stack">
-      <h1 className="page-title">Watchlist</h1>
+      <h1 className="page-title">{t.watchlist.title}</h1>
       <p className="muted">
-        Follow companies to see their newest filings here, from SEC EDGAR.
-        {updatedAt && <> Filings last updated {formatDate(updatedAt)}.</>}
+        {t.watchlist.intro}
+        {updatedAt && t.watchlist.updated(formatDate(updatedAt))}
       </p>
 
       <form
@@ -71,9 +73,9 @@ function Watchlist() {
           void add();
         }}
       >
-        <label htmlFor="add-company" className="visually-hidden">Company to follow</label>
+        <label htmlFor="add-company" className="visually-hidden">{t.watchlist.companyToFollow}</label>
         <select id="add-company" className="select" value={choice} onChange={(e) => setChoice(e.target.value)}>
-          <option value="">Choose a company…</option>
+          <option value="">{t.watchlist.choose}</option>
           {available.map((c) => (
             <option key={c.ticker} value={c.ticker}>
               {c.ticker}: {c.name}
@@ -81,21 +83,21 @@ function Watchlist() {
           ))}
         </select>
         <button type="submit" className="btn btn--primary" disabled={!choice}>
-          Follow
+          {t.watchlist.follow}
         </button>
       </form>
 
       {error && <p className="notice notice--error" role="alert">{error}</p>}
-      {loading && <p className="muted" role="status">Loading…</p>}
+      {loading && <p className="muted" role="status">{t.common.loading}</p>}
 
       {!loading && items.length === 0 && (
-        <p className="empty">You aren’t following any companies yet. Choose one above to start.</p>
+        <p className="empty">{t.watchlist.empty}</p>
       )}
 
       {items.length > 0 && (
         <div className="two-col">
           <section aria-labelledby="following">
-            <h2 id="following" className="section-title">Following</h2>
+            <h2 id="following" className="section-title">{t.watchlist.following}</h2>
             <ul className="rule-list">
               {items.map((i) => (
                 <li key={i.ticker} className="rule-list__row">
@@ -103,7 +105,7 @@ function Watchlist() {
                     <strong>{i.ticker}</strong> <span className="muted">{i.name}</span>
                   </span>
                   <button type="button" className="link-button" onClick={() => remove(i.ticker)}>
-                    Unfollow
+                    {t.watchlist.unfollow}
                   </button>
                 </li>
               ))}
@@ -111,17 +113,17 @@ function Watchlist() {
           </section>
 
           <section aria-labelledby="latest">
-            <h2 id="latest" className="section-title">Latest filings</h2>
+            <h2 id="latest" className="section-title">{t.watchlist.latest}</h2>
             {filings.length === 0 ? (
-              <p className="empty">No filings yet for these companies.</p>
+              <p className="empty">{t.watchlist.noFilings}</p>
             ) : (
               <table className="filings-table">
                 <thead>
                   <tr>
-                    <th scope="col">Filed</th>
-                    <th scope="col">Company</th>
-                    <th scope="col">Form</th>
-                    <th scope="col"><span className="visually-hidden">Actions</span></th>
+                    <th scope="col">{t.watchlist.filed}</th>
+                    <th scope="col">{t.watchlist.company}</th>
+                    <th scope="col">{t.watchlist.form}</th>
+                    <th scope="col"><span className="visually-hidden">{t.watchlist.actions}</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -132,7 +134,7 @@ function Watchlist() {
                       <td className="nowrap">{f.form_type}</td>
                       <td className="table-actions">
                         <Link href={`/?ticker=${encodeURIComponent(f.ticker)}&form=${encodeURIComponent(f.form_type)}`}>
-                          Ask about it
+                          {t.watchlist.askAboutIt}
                         </Link>
                         <a href={f.source_url} target="_blank" rel="noreferrer">SEC.gov</a>
                       </td>

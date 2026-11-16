@@ -6,6 +6,8 @@ Firestore layout
     users/{uid}/bookmarks/{id}       saved answers and filings
     users/{uid}/history/{id}         past searches
     usage/{YYYY-MM-DD}               searches across all users that day
+    free_usage/{YYYY-MM-DD}_{key}    free "Try it now" questions: per browser, per
+                                     network (hashed) and the day's total
     companies/{ticker}, filings/{id} written by the ingestion job (read-only here)
 """
 
@@ -31,7 +33,7 @@ def today() -> str:
 class QuotaResult:
     allowed: bool
     used: int
-    reason: str = ""
+    reason: str = ""  # "user_quota" or "global_quota" when not allowed
 
 
 class Store(Protocol):
@@ -40,6 +42,9 @@ class Store(Protocol):
     def searches_on(self, uid: str, day: str) -> int: ...
 
     def list_companies(self) -> list[dict[str, Any]]: ...
+    def count_filings(self) -> int: ...
+    def consume_free(self, day: str, visitor: str, network: str, per_visitor: int,
+                     per_network: int, daily_total: int) -> str | None: ...
     def index_updated_at(self) -> str | None: ...
     def recent_filings(self, tickers: list[str], limit: int) -> list[dict[str, Any]]: ...
 
@@ -67,6 +72,7 @@ class MemoryStore:
         self.companies = list(companies or [])
         self.filings = list(filings or [])
         self.runs: list[dict] = []
+        self.free: dict[str, int] = {}
         self.watch: dict[str, dict[str, dict]] = {}
         self.bookmarks: dict[str, dict[str, dict]] = {}
         self.history: dict[str, dict[str, dict]] = {}
@@ -81,9 +87,9 @@ class MemoryStore:
         with self._lock:
             used = self.searches_on(uid, day)
             if used >= user_limit:
-                return QuotaResult(False, used, "You've used all your searches for today on this account. They reset at midnight UTC")
+                return QuotaResult(False, used, "user_quota")
             if self.usage.get(day, 0) >= global_limit:
-                return QuotaResult(False, used, "This demo has reached its daily search limit across all visitors, which keeps its costs down. Please try again tomorrow")
+                return QuotaResult(False, used, "global_quota")
             self.users.setdefault(uid, {})["usage"] = {"day": day, "count": used + 1}
             self.usage[day] = self.usage.get(day, 0) + 1
             return QuotaResult(True, used + 1)
@@ -94,6 +100,19 @@ class MemoryStore:
 
     def list_companies(self):
         return sorted(self.companies, key=lambda c: c["ticker"])
+
+    def count_filings(self):
+        return len(self.filings)
+
+    def consume_free(self, day, visitor, network, per_visitor, per_network, daily_total):
+        with self._lock:
+            keys = {k: f"{day}_{k}" for k in ("total", visitor, network)}
+            counts = {k: self.free.get(v, 0) for k, v in keys.items()}
+            reason = _free_reason(counts, visitor, network, per_visitor, per_network, daily_total)
+            if reason is None:
+                for v in keys.values():
+                    self.free[v] = self.free.get(v, 0) + 1
+            return reason
 
     def index_updated_at(self):
         done = [r["finished_at"] for r in self.runs if r.get("finished_at")]
@@ -166,10 +185,10 @@ class FirestoreStore:
             usage = user.get("usage") or {}
             used = usage.get("count", 0) if usage.get("day") == day else 0
             if used >= user_limit:
-                return QuotaResult(False, used, "You've used all your searches for today on this account. They reset at midnight UTC")
+                return QuotaResult(False, used, "user_quota")
             total = (usage_ref.get(transaction=transaction).to_dict() or {}).get("count", 0)
             if total >= global_limit:
-                return QuotaResult(False, used, "This demo has reached its daily search limit across all visitors, which keeps its costs down. Please try again tomorrow")
+                return QuotaResult(False, used, "global_quota")
             transaction.set(user_ref, {"usage": {"day": day, "count": used + 1}}, merge=True)
             transaction.set(usage_ref, {"count": total + 1}, merge=True)
             return QuotaResult(True, used + 1)
@@ -187,6 +206,29 @@ class FirestoreStore:
                       key=lambda c: c["ticker"])
         self._companies = (time.monotonic(), rows)
         return rows
+
+    def count_filings(self):
+        """Number of filings in the catalog (one aggregation query, not a full read)."""
+        result = self.db.collection("filings").count(alias="n").get()
+        return int(result[0][0].value) if result and result[0] else 0
+
+    def consume_free(self, day, visitor, network, per_visitor, per_network, daily_total):
+        col = self.db.collection("free_usage")
+        refs = {k: col.document(f"{day}_{k}") for k in ("total", visitor, network)}
+
+        @self._fs.transactional
+        def txn(transaction) -> str | None:
+            counts = {
+                k: (ref.get(transaction=transaction).to_dict() or {}).get("count", 0)
+                for k, ref in refs.items()
+            }
+            reason = _free_reason(counts, visitor, network, per_visitor, per_network, daily_total)
+            if reason is None:
+                for k, ref in refs.items():
+                    transaction.set(ref, {"count": counts[k] + 1, "day": day}, merge=True)
+            return reason
+
+        return txn(self.db.transaction())
 
     def index_updated_at(self):
         """Finish time of the latest ingestion run (written by ingestion/edgar/update.py)."""
@@ -265,3 +307,13 @@ class FirestoreStore:
                 batch.delete(d.reference)
             batch.commit()
             deleted += len(docs)
+
+
+def _free_reason(counts: dict[str, int], visitor: str, network: str, per_visitor: int,
+                 per_network: int, daily_total: int) -> str | None:
+    """Why a free question is refused, or None if it is allowed."""
+    if counts[visitor] >= per_visitor:
+        return "free_used"
+    if counts[network] >= per_network or counts["total"] >= daily_total:
+        return "free_limit"
+    return None

@@ -206,9 +206,11 @@ def test_daily_user_and_global_quota():
     assert client.post("/search", json={"query": "risk"}, headers=AUTH).status_code == 200
     r = client.post("/search", json={"query": "risk"}, headers=AUTH)
     assert r.status_code == 429 and "this account" in r.json()["detail"]
+    assert r.json()["code"] == "user_quota"  # the website translates by code
     assert client.post("/search", json={"query": "risk"}, headers=bob).status_code == 200
     r = client.post("/search", json={"query": "risk"}, headers=carol)
     assert r.status_code == 429 and "across all visitors" in r.json()["detail"]
+    assert r.json()["code"] == "global_quota"
 
 
 def test_sliding_window_frees_slots_over_time():
@@ -277,3 +279,71 @@ def test_clear_history():
     assert len(client.get("/history", headers=AUTH).json()) == 3
     assert client.delete("/history", headers=AUTH).json() == {"deleted": 3}
     assert client.get("/history", headers=AUTH).json() == []
+
+
+# ---------------------------------------------------------------- public homepage
+
+def free(client, visitor="visitor-aaaa", ip="203.0.113.7", secret="proxy-s3cret", **body):
+    headers = {"X-Proxy-Secret": secret, "X-Visitor-Id": visitor, "X-Client-IP": ip}
+    return client.post("/public/try", json={"query": "What supply chain risks?", **body}, headers=headers)
+
+
+def test_public_stats_need_no_sign_in_and_are_cached():
+    client = make_client()
+    store = client.services.store
+    store.runs.append({"finished_at": "2026-11-12T08:30:00+00:00"})
+    r = client.get("/public/stats")
+    assert r.status_code == 200
+    assert r.json() == {"filings": 3, "companies": 2, "updated_at": "2026-11-12T08:30:00+00:00"}
+    store.filings.append(dict(FILINGS[0], filing_id="new"))
+    assert client.get("/public/stats").json()["filings"] == 3  # served from the cache
+
+
+def test_free_question_answers_without_sign_in_or_history():
+    client = make_client(proxy_secret="proxy-s3cret")
+    r = free(client)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["answer"] and data["citations"] and data["history_id"] is None
+    assert client.services.store.history == {}
+
+
+def test_free_question_requires_the_website_secret():
+    client = make_client(proxy_secret="proxy-s3cret")
+    assert free(client, secret="").status_code == 403
+    assert free(client, secret="wrong").json()["code"] == "free_unavailable"
+    # Switched off entirely when no secret is configured.
+    assert free(make_client(), secret="").status_code == 403
+
+
+def test_free_question_limits():
+    client = make_client(proxy_secret="proxy-s3cret", free_per_network=2, free_daily_total=3)
+    assert free(client, visitor="visitor-aaaa").status_code == 200
+    r = free(client, visitor="visitor-aaaa")  # same browser again
+    assert r.status_code == 429 and r.json()["code"] == "free_used"
+    assert free(client, visitor="visitor-bbbb").status_code == 200  # same network, 2nd browser
+    r = free(client, visitor="visitor-cccc")  # network limit reached
+    assert r.status_code == 429 and r.json()["code"] == "free_limit"
+    assert free(client, visitor="visitor-dddd", ip="198.51.100.9").status_code == 200  # 3rd overall
+    r = free(client, visitor="visitor-eeee", ip="192.0.2.1")  # daily total reached
+    assert r.status_code == 429 and r.json()["code"] == "free_limit"
+    # Network addresses are only stored hashed.
+    assert not any("203.0.113.7" in key for key in client.services.store.free)
+
+
+def test_free_question_validation():
+    client = make_client(proxy_secret="proxy-s3cret", free_max_chars=50)
+    r = free(client, query="x" * 51)
+    assert r.status_code == 422 and r.json()["code"] == "free_too_long"
+    assert free(client, visitor="bad id!").status_code == 400
+    assert free(client, ip="").status_code == 400
+
+
+def test_free_question_bot_check(monkeypatch):
+    import app.main as main
+
+    client = make_client(proxy_secret="proxy-s3cret", turnstile_secret="ts")
+    monkeypatch.setattr(main, "verify_turnstile", lambda secret, token, ip: token == "ok")
+    r = free(client, turnstile_token="forged")
+    assert r.status_code == 403 and r.json()["code"] == "bot_check_failed"
+    assert free(client, turnstile_token="ok").status_code == 200

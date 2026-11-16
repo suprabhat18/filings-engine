@@ -24,6 +24,14 @@ ALLOWED_EMAILS=""
 DAILY_USER_QUOTA="20"
 DAILY_GLOBAL_QUOTA="200"
 
+# Free "Try it now" question on the homepage (no sign-in).
+# PROXY_SECRET: a long random string (openssl rand -hex 32). Put the same value in
+# Vercel as PROXY_SECRET. Empty = free questions are switched off.
+PROXY_SECRET=""
+# Optional Cloudflare Turnstile secret key (free bot check); pair it with
+# NEXT_PUBLIC_TURNSTILE_SITE_KEY in Vercel. Empty = no bot check.
+TURNSTILE_SECRET=""
+
 # Your deployed frontend URL (fill in after the first Vercel deploy)
 FRONTEND_URL="https://your-app.vercel.app"
 

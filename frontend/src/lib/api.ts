@@ -63,9 +63,11 @@ export type Me = {
   daily_quota: number;
   index_updated_at: string | null;
 };
+export type PublicStats = { filings: number; companies: number; updated_at: string | null };
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  /** `code` names the error for translation (see i18n errors); `message` is English. */
+  constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
 }
@@ -79,22 +81,13 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const detail = typeof data.detail === "string"
-        ? data.detail
-        : `Something went wrong (error ${res.status}). Try again.`;
-    throw new ApiError(res.status, detail);
+    const detail = typeof data.detail === "string" ? data.detail : "";
+    throw new ApiError(res.status, detail, typeof data.code === "string" ? data.code : undefined);
   }
   return data as T;
 }
 
 export const FORM_TYPES = ["10-K", "10-Q", "8-K"] as const;
-
-export function formatDate(iso: string): string {
-  const d = new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso);
-  return Number.isNaN(d.getTime())
-    ? iso
-    : d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
-}
 
 export function filingFromCitation(c: Citation): Filing {
   return {

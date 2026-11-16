@@ -29,6 +29,17 @@ class Settings(BaseSettings):
     daily_user_quota: int = 50           # searches per user per day
     daily_global_quota: int = 1000       # searches across all users per day
 
+    # Free "Try it now" questions on the public homepage (no sign-in)
+    free_per_visitor: int = 1            # per browser per day
+    free_per_network: int = 3            # per network (hashed IP address) per day
+    free_daily_total: int = 100          # across all visitors per day (~$0.50)
+    free_max_chars: int = 200
+    # Shared secret the website's server sends with free questions, so the endpoint
+    # can't be called directly. Empty = free questions are switched off.
+    proxy_secret: str = ""
+    # Optional Cloudflare Turnstile secret; when set, free questions need a valid token.
+    turnstile_secret: str = ""
+
     cors_origins: str = "http://localhost:3000"
 
     @property
