@@ -188,6 +188,11 @@ a {
   color: var(--band-ink);
 }
 
+.nav__link--icon {
+  display: inline-flex;
+  align-items: center;
+}
+
 .nav__link[aria-current="page"] {
   color: var(--band-ink);
   border-bottom-color: var(--highlight);

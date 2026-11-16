@@ -16,6 +16,7 @@ const zh: Dict = {
     remove: "移除",
   },
   nav: {
+    home: "首页",
     main: "主导航",
     search: "搜索",
     watchlist: "关注列表",

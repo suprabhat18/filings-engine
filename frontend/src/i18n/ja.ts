@@ -15,6 +15,7 @@ const ja: Dict = {
     remove: "削除",
   },
   nav: {
+    home: "ホーム",
     main: "メイン",
     search: "検索",
     watchlist: "ウォッチリスト",

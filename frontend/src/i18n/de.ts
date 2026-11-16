@@ -15,6 +15,7 @@ const de: Dict = {
     remove: "Entfernen",
   },
   nav: {
+    home: "Startseite",
     main: "Hauptnavigation",
     search: "Suche",
     watchlist: "Beobachtungsliste",

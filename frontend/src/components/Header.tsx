@@ -16,11 +16,11 @@ export default function Header({ initialTheme }: { initialTheme: Theme }) {
 
   const nav = signedIn
     ? [
+        { href: "/about", label: t.nav.home, icon: true },
         { href: "/", label: t.nav.search },
         { href: "/watchlist", label: t.nav.watchlist },
         { href: "/bookmarks", label: t.nav.bookmarks },
         { href: "/history", label: t.nav.history },
-        { href: "/about", label: t.nav.about },
       ]
     : [{ href: pathname === "/" ? "#how" : "/#how", label: t.nav.about }];
 
@@ -36,10 +36,21 @@ export default function Header({ initialTheme }: { initialTheme: Theme }) {
               <li key={item.href}>
                 <Link
                   href={item.href}
-                  className="nav__link"
+                  className={"icon" in item ? "nav__link nav__link--icon" : "nav__link"}
                   aria-current={pathname === item.href ? "page" : undefined}
+                  title={"icon" in item ? item.label : undefined}
                 >
-                  {item.label}
+                  {"icon" in item ? (
+                    <>
+                      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3.5 10.5 12 3.5l8.5 7" />
+                        <path d="M5.5 9v11h4.5v-6h4v6h4.5V9" />
+                      </svg>
+                      <span className="visually-hidden">{item.label}</span>
+                    </>
+                  ) : (
+                    item.label
+                  )}
                 </Link>
               </li>
             ))}

@@ -15,6 +15,7 @@ const hi: Dict = {
     remove: "हटाएँ",
   },
   nav: {
+    home: "होम",
     main: "मुख्य",
     search: "खोजें",
     watchlist: "वॉचलिस्ट",

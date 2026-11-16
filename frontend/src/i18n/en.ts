@@ -18,6 +18,7 @@ const en = {
     remove: "Remove",
   },
   nav: {
+    home: "Home",
     main: "Main",
     search: "Search",
     watchlist: "Watchlist",
