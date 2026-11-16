@@ -5,8 +5,9 @@ import "./globals.css";
 
 const SITE_URL = process.env.NEXTAUTH_URL ?? "https://filings-engine.vercel.app";
 const TITLE = "Filings Research";
+// LinkedIn asks for at least 100 characters.
 const DESCRIPTION =
-  "Ask questions in any language about S&P 100 SEC filings and get answers that cite their sources.";
+  "Ask questions in any language about the SEC filings of S&P 100 companies and get answers that cite the exact passage they came from.";
 
 // The Open Graph and Twitter tags are what LinkedIn, WhatsApp, Slack and X read to
 // build a link preview card; the image comes from app/opengraph-image.tsx.
